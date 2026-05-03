@@ -1,0 +1,23 @@
+# sparse_gemma4/requirements.txt
+# Testado com Python 3.10+ | CUDA 12.1+ | NVIDIA Ampere (A100/A10G/RTX 3090+)
+
+# Core — PyTorch >= 2.4 para SparseSemiStructuredTensor estável
+torch>=2.4.0
+torchvision>=0.19.0
+
+# HuggingFace — transformers >= 4.50 para Gemma 4
+transformers>=4.50.0
+accelerate>=0.30.0
+huggingface_hub>=0.24.0
+
+# Monitoramento GPU/sistema
+pynvml>=11.5.0
+psutil>=5.9.0
+
+# Utilitários
+tqdm>=4.66.0
+numpy>=1.26.0
+
+# Opcionais para benchmarks de acurácia
+# lm_eval>=0.4.0
+# datasets>=2.20.0

@@ -1,0 +1,312 @@
+
+<h2 class="sr-only">Gemma 4 Neo — arquitetura híbrida unindo transformer, SSM e SNN: visualização interativa completa</h2>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.tabs{display:flex;gap:2px;border-bottom:0.5px solid var(--color-border-secondary);margin-bottom:18px;flex-wrap:wrap}
+.tab{padding:7px 14px;font-size:12px;cursor:pointer;border:none;background:transparent;color:var(--color-text-secondary);border-bottom:2px solid transparent;transition:all .15s}
+.tab.on{color:var(--color-text-primary);border-bottom-color:var(--color-text-primary);font-weight:500}
+.panel{display:none}.panel.on{display:block}
+.row{display:flex;gap:10px;margin-bottom:10px;align-items:stretch}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 18px;flex:1}
+.card h3{font-size:14px;font-weight:500;color:var(--color-text-primary);margin-bottom:8px}
+.card p,.card li{font-size:12px;color:var(--color-text-secondary);line-height:1.6}
+.card ul{padding-left:16px;margin-top:5px}
+.pill{display:inline-block;font-size:10px;font-weight:500;padding:2px 7px;border-radius:8px;white-space:nowrap}
+.pill-ssm{background:#EEEDFE;color:#3C3489}.pill-attn{background:#E1F5EE;color:#0F6E56}
+.pill-mlp{background:#FAEEDA;color:#633806}.pill-q{background:#E6F1FB;color:#0C447C}
+@media(prefers-color-scheme:dark){
+.pill-ssm{background:#26215C;color:#CECBF6}.pill-attn{background:#04342C;color:#9FE1CB}
+.pill-mlp{background:#412402;color:#FAC775}.pill-q{background:#042C53;color:#B5D4F4}}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin:12px 0}
+.m{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px;text-align:center}
+.m .v{font-size:22px;font-weight:500;color:var(--color-text-primary)}
+.m .l{font-size:11px;color:var(--color-text-secondary);margin-top:2px}
+.layer-vis{display:flex;gap:3px;flex-wrap:wrap;margin:10px 0;align-items:flex-end}
+.lyr{width:11px;cursor:pointer;border-radius:2px;transition:all .2s;flex-shrink:0}
+.lyr:hover{opacity:0.7;transform:scaleY(1.1)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary)}
+.leg-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.block-detail{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 14px;margin-top:10px;font-size:12px;color:var(--color-text-secondary)}
+.block-detail strong{color:var(--color-text-primary)}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.bar-label{font-size:11px;color:var(--color-text-secondary);width:110px;flex-shrink:0;text-align:right}
+.bar-track{flex:1;height:12px;background:var(--color-background-secondary);border-radius:6px;overflow:hidden}
+.bar-fill{height:100%;border-radius:6px;transition:width .4s}
+.bar-val{font-size:11px;font-weight:500;color:var(--color-text-primary);width:40px;flex-shrink:0}
+.diff{font-size:11px;padding:2px 6px;border-radius:4px;font-weight:500}
+.diff-good{background:#EAF3DE;color:#3B6D11}
+.diff-ok{background:#FAEEDA;color:#633806}
+@media(prefers-color-scheme:dark){.diff-good{background:#173404;color:#C0DD97}.diff-ok{background:#412402;color:#FAC775}}
+.innov-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:500px){.innov-grid{grid-template-columns:1fr}}
+.innov-card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px}
+.innov-card .tag{font-size:10px;font-weight:500;margin-bottom:6px}
+.innov-card h4{font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px}
+.innov-card p{font-size:12px;color:var(--color-text-secondary);line-height:1.55}
+.flow-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.flow-box{border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:6px 10px;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-primary)}
+.flow-arrow{font-size:14px;color:var(--color-text-tertiary)}
+.toggle-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;font-size:12px;color:var(--color-text-secondary)}
+.tog{position:relative;width:36px;height:20px;display:inline-block;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.tog-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:var(--color-border-secondary);border-radius:10px;transition:.2s}
+.tog-slider:before{position:absolute;content:"";height:14px;width:14px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.2s}
+input:checked+.tog-slider{background:#1D9E75}
+input:checked+.tog-slider:before{transform:translateX(16px)}
+</style>
+
+<div style="padding:1rem 0">
+<div style="margin-bottom:18px">
+  <div style="font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;margin-bottom:4px">PROPOSTA ARQUITETURAL · GEMMA 4</div>
+  <div style="font-size:21px;font-weight:500;color:var(--color-text-primary)">Gemma 4 Neo — hybrid architecture</div>
+  <div style="font-size:13px;color:var(--color-text-secondary);margin-top:4px">Transformer + SSM + SNN: o melhor dos três mundos, mapeado camada a camada</div>
+</div>
+
+<div class="tabs">
+  <button class="tab on" onclick="tab('overview')">Visão geral</button>
+  <button class="tab" onclick="tab('layers')">42 camadas</button>
+  <button class="tab" onclick="tab('innovations')">Inovações</button>
+  <button class="tab" onclick="tab('pipeline')">Pipeline de conversão</button>
+  <button class="tab" onclick="tab('metrics')">Métricas</button>
+</div>
+
+<div id="p-overview" class="panel on">
+  <div class="row">
+    <div class="card" style="flex:1.2">
+      <h3>O que muda em cada camada</h3>
+      <div style="margin-top:8px">
+        <div class="flow-row">
+          <span class="pill pill-ssm">35 camadas locais</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">SWA (q=2048, k/v=512)</span>
+          <span class="flow-arrow">→</span>
+          <span class="pill pill-ssm">Mamba-2 SSM</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">O(1)/step, sem KV cache</span>
+        </div>
+        <div class="flow-row">
+          <span class="pill pill-attn">7 camadas globais</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">Full attn (q=4096, k/v=1024)</span>
+          <span class="flow-arrow">→</span>
+          <span class="pill pill-attn">Gated Attention</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">+ SnapKV + sigmoid gate</span>
+        </div>
+        <div class="flow-row">
+          <span class="pill pill-mlp">42 MLPs</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">GELUTanh, denso</span>
+          <span class="flow-arrow">→</span>
+          <span class="pill pill-mlp">ReLU² + SpikeSparse</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">50–70% zeros</span>
+        </div>
+        <div class="flow-row">
+          <span class="pill pill-q">todos os pesos</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">BF16/FP16</span>
+          <span class="flow-arrow">→</span>
+          <span class="pill pill-q">W4A8 quantization</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">+ KV-INT8 (7 layers)</span>
+        </div>
+        <div class="flow-row">
+          <span class="pill" style="background:#FAECE7;color:#712B13">per_layer_input_gate</span>
+          <span style="font-size:11px;color:var(--color-text-secondary)">bottleneck 2560→256</span>
+          <span class="flow-arrow">→</span>
+          <span class="pill" style="background:#FAECE7;color:#712B13">dynamic sparsity predictor</span>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="flex:0.8">
+      <h3>Analogia cerebral</h3>
+      <ul>
+        <li style="margin-bottom:6px"><strong style="color:var(--color-text-primary)">Mamba-2:</strong> memória de trabalho recorrente — como o hipocampo codifica sequências com estado comprimido</li>
+        <li style="margin-bottom:6px"><strong style="color:var(--color-text-primary)">Gated Attention:</strong> atenção focal — como o córtex pré-frontal acessa o contexto global seletivamente</li>
+        <li style="margin-bottom:6px"><strong style="color:var(--color-text-primary)">ReLU² + SpikeSparse:</strong> disparo spiking — neurônios só ativam quando estimulo supera threshold</li>
+        <li style="margin-bottom:6px"><strong style="color:var(--color-text-primary)">Per-layer gate:</strong> neuromodulação — dopamina/serotonina decidindo quais circuitos ativar</li>
+        <li><strong style="color:var(--color-text-primary)">SnapKV:</strong> memória episódica seletiva — hipocampo descarta memórias irrelevantes</li>
+      </ul>
+    </div>
+  </div>
+  <div class="metrics">
+    <div class="m"><div class="v">~10×</div><div class="l">menos memória</div></div>
+    <div class="m"><div class="v">~8×</div><div class="l">decode speedup CPU</div></div>
+    <div class="m"><div class="v">~65%</div><div class="l">sparsidade MLP</div></div>
+    <div class="m"><div class="v">~90%</div><div class="l">redução energia</div></div>
+    <div class="m"><div class="v">&lt;3%</div><div class="l">acc loss</div></div>
+  </div>
+  <div class="block-detail">
+    <strong>Princípio unificador:</strong> Mamba-2 carrega a memória sequencial O(n) → O(1). Gated Attention ancora o recall preciso em checkpoints globais. ReLU² + threshold transforma o MLP denso em circuito event-driven. O per_layer_input_gate existente do Gemma 4 vira o "router" neuronal — decidindo quais dos 10.240 neurônios da MLP precisam disparar para cada token.
+  </div>
+</div>
+
+<div id="p-layers" class="panel">
+  <div class="toggle-row">
+    <label class="tog"><input type="checkbox" id="tog-orig" onchange="renderLayers()"><span class="tog-slider"></span></label>
+    <span id="tog-label">Mostrar: Gemma 4 Neo (proposto)</span>
+    <span style="flex:1"></span>
+    <span id="layer-info" style="font-size:11px;color:var(--color-text-tertiary)">Passe o mouse sobre uma camada</span>
+  </div>
+  <div class="layer-vis" id="layer-vis"></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#7F77DD"></div><span>Mamba-2 SSM (local recorrente)</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#1D9E75"></div><span>Gated Attention (global focal)</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#888780"></div><span>Local SWA original</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#378ADD"></div><span>Global Full Attention original</span></div>
+  </div>
+  <div class="block-detail" id="layer-detail" style="margin-top:12px">
+    <strong>Como ler:</strong> cada barra representa uma das 42 camadas decoder do Gemma 4 (0–41). Altura proporcional ao custo computacional. Camadas globais (posições 5,11,17,23,29,35,41) são mais altas — mais cabeças de atenção. Use o toggle para comparar arquitetura original vs proposta Neo.
+  </div>
+</div>
+
+<div id="p-innovations" class="panel">
+  <div class="innov-grid">
+    <div class="innov-card">
+      <div class="tag pill pill-ssm">Inovação 1 — SSM backbone</div>
+      <h4>Mamba-2 como espinha recorrente</h4>
+      <p>Substitui os 35 blocos SWA locais. Estado comprimido O(d_state) por layer — sem KV cache. Ao contrário do RNN clássico, o Mamba-2 tem paralelismo de treinamento via scan seletivo. Captura dependências longas com estado fixo de ~64–256 dimensões vs KV de 512 por layer no original.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Ganho:</strong> 83% do KV cache eliminado. Decode O(1) por step em vez de O(n).</p>
+    </div>
+    <div class="innov-card">
+      <div class="tag pill pill-attn">Inovação 2 — Gated Attention</div>
+      <h4>Atenção focal com gate sigmoid</h4>
+      <p>Os 7 layers globais viram Gated Attention (NeurIPS 2025 Best Paper). Um gate σ(X·Wθ) por cabeça modula a saída de atenção — se o gate for ~0, a cabeça contribui zero sem precisar computar o softmax completo. Elimina attention sinks e melhora extrapolação de contexto longo. Combinado com SnapKV: top-k tokens relevantes via KV-summary.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Ganho:</strong> KV cache só nos 7 layers globais, com 80% dos tokens descartáveis via SnapKV.</p>
+    </div>
+    <div class="innov-card">
+      <div class="tag pill pill-mlp">Inovação 3 — ReLU² + SpikeSparse</div>
+      <h4>MLPs event-driven</h4>
+      <p>GELUTanh → ReLU²(x) = max(0,x)². Produz zeros exatos com esparsidade ~50–70%. O per_layer_input_gate do Gemma 4 (2560→256) vira preditor: sua magnitude prevê quais das 10.240 dimensões da MLP precisam ser computadas. SpikingBrain-style: threshold por neurônio calibrado em dataset pequeno, sem retreino completo.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Ganho:</strong> ~50–70% de FLOPs no MLP eliminados. CPU-friendly: skip de linhas inteiras da weight matrix.</p>
+    </div>
+    <div class="innov-card">
+      <div class="tag pill pill-q">Inovação 4 — W4A8 + KV-INT8</div>
+      <h4>Quantização em cascata</h4>
+      <p>Pesos → INT4 (AWQ/GPTQ). Ativações → INT8 (SmoothQuant nos residuals). KV cache dos 7 layers globais → INT8. Combinado com esparsidade ReLU²: os neurônios que disparam são em INT8, os que não disparam são zero — não precisam sequer ser dequantizados. Resultado: pipeline compute-bound nos layers Mamba (scan), memory-bound mínimo nos layers globais.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Ganho:</strong> 4× memória de pesos + 8× KV cache + 2× compute via INT8 kernels.</p>
+    </div>
+    <div class="innov-card">
+      <div class="tag pill" style="background:#FAECE7;color:#712B13">Inovação 5 — Per-layer gate reaproveitado</div>
+      <h4>Gate existente como neuromodulador</h4>
+      <p>Gemma 4 já tem per_layer_input_gate: Linear(2560→256) + RMSNorm + Linear(256→2560). A norma L2 do vetor 256-dim prevê importância de cada neurônio na MLP daquele layer. Threshold calibrável por layer sem retreino. Neurônios com score abaixo do threshold são pulados. Análogo exato à neuromodulação dopaminérgica.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Gain:</strong> esparsidade dinâmica e input-dependent — cada token ativa subconjunto diferente de neurônios.</p>
+    </div>
+    <div class="innov-card">
+      <div class="tag pill" style="background:#FBEAF0;color:#72243E">Inovação 6 — Speculative decoding</div>
+      <h4>Codificação preditiva: E2B → E4B</h4>
+      <p>E2B como modelo draft (2B params ativos), E4B como verifier. O draft propõe k tokens em paralelo — o verifier aceita ou rejeita em um único forward pass. Taxa de aceitação ~70–80% para linguagem natural. Combina com todo o stack acima: o draft já usa Mamba-2 + ReLU², o verifier valida apenas o que importa.</p>
+      <p style="margin-top:6px"><strong style="color:var(--color-text-primary)">Ganho:</strong> 2–4× speedup de tokens/segundo sem nenhuma perda de accuracy.</p>
+    </div>
+  </div>
+</div>
+
+<div id="p-pipeline" class="panel">
+  <div class="card" style="margin-bottom:10px">
+    <h3>Pipeline de conversão — ordem e custo</h3>
+    <p style="margin-bottom:14px">Cada passo é incremental e reversível. Pode-se parar em qualquer ponto e ter ganhos parciais.</p>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#1D9E75;color:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">1</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">Quantização W4A8 + KV-INT8</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Zero retreino. AWQ calibration (~1h). Redução imediata de memória 4×. Funciona como base para todos os passos seguintes.</div><div style="margin-top:4px"><span class="diff diff-good">Custo: 1h GPU</span> <span class="diff diff-good">Ganho: 4× memória</span></div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#1D9E75;color:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">2</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">SnapKV + PagedAttention (serving layer)</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">vLLM config. Sem mudança de pesos. KV eviction nos 7 layers globais. Continuous batching. Ganho imediato em throughput de serving.</div><div style="margin-top:4px"><span class="diff diff-good">Custo: config</span> <span class="diff diff-good">Ganho: 2× throughput</span></div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#1D9E75;color:#E1F5EE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">3</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">GELUTanh → ReLU² + threshold gate</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Substituição de ativação + calibração do per_layer_input_gate como preditor de sparsidade. Fine-tuning leve: ~30B tokens. Esparsidade de ativação 50–70%.</div><div style="margin-top:4px"><span class="diff diff-ok">Custo: ~1 semana GPU</span> <span class="diff diff-good">Ganho: ~2× FLOPs MLP</span></div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#534AB7;color:#EEEDFE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">4</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">Gated Attention nos 7 layers globais</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Adiciona Wθ sigmoid gate após SDPA em cada cabeça. Inicialização com ones — gate começa transparente. Fine-tuning ~50B tokens para estabilizar. Elimina attention sinks, melhora contexto longo.</div><div style="margin-top:4px"><span class="diff diff-ok">Custo: ~2 semanas GPU</span> <span class="diff diff-good">Ganho: qualidade + estabilidade</span></div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#534AB7;color:#EEEDFE;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">5</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">SWA → Mamba-2 nos 35 layers locais</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Conversão por distilação: Mamba-2 imita saída dos layers SWA via MSE loss. Passo mais intenso: ~150B tokens de continual pre-training. SpikingBrain mostrou que ~2% do compute original é suficiente para recuperar acc.</div><div style="margin-top:4px"><span class="diff diff-ok">Custo: ~1–3 meses GPU cluster</span> <span class="diff diff-good">Ganho: 8–10× decode speedup</span></div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+        <div style="min-width:28px;height:28px;border-radius:50%;background:#888780;color:#F1EFE8;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0">6</div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--color-text-primary)">SFT final + speculative decoding E2B→E4B</div><div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px">Fine-tuning supervisionado para realinhamento de instrução. Configurar E2B-Neo como draft model para E4B-Neo ou 27B-Neo. 2–4× speedup adicional sem acc loss.</div><div style="margin-top:4px"><span class="diff diff-ok">Custo: ~1 semana</span> <span class="diff diff-good">Ganho: 2–4× tokens/s</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="p-metrics" class="panel">
+  <div class="card" style="margin-bottom:10px">
+    <h3>Comparativo: Gemma 4 original vs Gemma 4 Neo</h3>
+    <div style="margin-top:12px">
+      <div style="font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:.03em">MEMÓRIA (KV cache + ativações, contexto 32k)</div>
+      <div class="bar-row"><div class="bar-label">Original</div><div class="bar-track"><div class="bar-fill" style="width:100%;background:#E24B4A"></div></div><div class="bar-val">100%</div></div>
+      <div class="bar-row"><div class="bar-label">Neo (passo 1-2)</div><div class="bar-track"><div class="bar-fill" style="width:25%;background:#1D9E75"></div></div><div class="bar-val">25% <span class="diff diff-good">4×</span></div></div>
+      <div class="bar-row"><div class="bar-label">Neo (completo)</div><div class="bar-track"><div class="bar-fill" style="width:10%;background:#1D9E75"></div></div><div class="bar-val">10% <span class="diff diff-good">10×</span></div></div>
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:.03em">LATÊNCIA DE DECODE (tokens/s, batch size 1, CPU)</div>
+      <div class="bar-row"><div class="bar-label">Original</div><div class="bar-track"><div class="bar-fill" style="width:10%;background:#E24B4A"></div></div><div class="bar-val">1×</div></div>
+      <div class="bar-row"><div class="bar-label">Neo (passo 1-3)</div><div class="bar-track"><div class="bar-fill" style="width:35%;background:#EF9F27"></div></div><div class="bar-val">3.5×</div></div>
+      <div class="bar-row"><div class="bar-label">Neo (completo)</div><div class="bar-track"><div class="bar-fill" style="width:80%;background:#1D9E75"></div></div><div class="bar-val">8× <span class="diff diff-good">8×</span></div></div>
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:.03em">SPARSIDADE DE ATIVAÇÃO (MLP)</div>
+      <div class="bar-row"><div class="bar-label">Original</div><div class="bar-track"><div class="bar-fill" style="width:2%;background:#E24B4A"></div></div><div class="bar-val">~2%</div></div>
+      <div class="bar-row"><div class="bar-label">ReLU² simples</div><div class="bar-track"><div class="bar-fill" style="width:55%;background:#EF9F27"></div></div><div class="bar-val">~55%</div></div>
+      <div class="bar-row"><div class="bar-label">ReLU² + gate</div><div class="bar-track"><div class="bar-fill" style="width:68%;background:#1D9E75"></div></div><div class="bar-val">~68% <span class="diff diff-good">34×</span></div></div>
+    </div>
+    <div style="margin-top:14px">
+      <div style="font-size:11px;font-weight:500;color:var(--color-text-secondary);margin-bottom:8px;letter-spacing:.03em">CONSUMO ENERGÉTICO (relativo ao original FP16)</div>
+      <div class="bar-row"><div class="bar-label">Original FP16</div><div class="bar-track"><div class="bar-fill" style="width:100%;background:#E24B4A"></div></div><div class="bar-val">100%</div></div>
+      <div class="bar-row"><div class="bar-label">W4A8 + SnapKV</div><div class="bar-track"><div class="bar-fill" style="width:30%;background:#EF9F27"></div></div><div class="bar-val">30%</div></div>
+      <div class="bar-row"><div class="bar-label">Neo completo</div><div class="bar-track"><div class="bar-fill" style="width:8%;background:#1D9E75"></div></div><div class="bar-val">8% <span class="diff diff-good">12×</span></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Accuracy esperada por benchmark</h3>
+    <div style="margin-top:8px;font-size:12px;color:var(--color-text-secondary)">
+      <div class="bar-row"><div class="bar-label">MMLU (conhec.)</div><div class="bar-track"><div class="bar-fill" style="width:96%;background:#7F77DD"></div></div><div class="bar-val">~96%</div></div>
+      <div class="bar-row"><div class="bar-label">GSM8K (math)</div><div class="bar-track"><div class="bar-fill" style="width:93%;background:#7F77DD"></div></div><div class="bar-val">~93%</div></div>
+      <div class="bar-row"><div class="bar-label">HumanEval (code)</div><div class="bar-track"><div class="bar-fill" style="width:94%;background:#7F77DD"></div></div><div class="bar-val">~94%</div></div>
+      <div class="bar-row"><div class="bar-label">Long-context recall</div><div class="bar-track"><div class="bar-fill" style="width:98%;background:#7F77DD"></div></div><div class="bar-val">~98%</div></div>
+    </div>
+    <p style="margin-top:8px;font-size:11px">Valores estimados relativos ao Gemma 4 original. Math/reasoning pode ter degradação maior se o Mamba-2 não for treinado com dados suficientes de reasoning. Long-context melhora com Gated Attention.</p>
+  </div>
+</div>
+
+</div>
+
+<script>
+function tab(id){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  event.target.classList.add('on');
+  document.getElementById('p-'+id).classList.add('on');
+  if(id==='layers') renderLayers();
+}
+
+const GLOBALS = new Set([5,11,17,23,29,35,41]);
+const HEIGHTS_ORIG = Array.from({length:42},(_,i)=>GLOBALS.has(i)?52:28);
+const COLORS_ORIG = Array.from({length:42},(_,i)=>GLOBALS.has(i)?'#378ADD':'#888780');
+const COLORS_NEO = Array.from({length:42},(_,i)=>GLOBALS.has(i)?'#1D9E75':'#7F77DD');
+const LABELS_ORIG = Array.from({length:42},(_,i)=>GLOBALS.has(i)?`Camada ${i}: Full Attention global (q=4096, k/v=1024) — KV cache cresce O(n)`:`Camada ${i}: SWA local (q=2048, k/v=512, janela fixa) — KV cache por janela`);
+const LABELS_NEO = Array.from({length:42},(_,i)=>GLOBALS.has(i)?`Camada ${i}: Gated Attention (sigmoid gate + SnapKV) — KV cache comprimido, sem attention sinks`:`Camada ${i}: Mamba-2 SSM (estado ~128-dim) — sem KV cache, O(1) por step`);
+
+function renderLayers(){
+  const orig=document.getElementById('tog-orig').checked;
+  const vis=document.getElementById('layer-vis');
+  const lbl=document.getElementById('tog-label');
+  lbl.textContent=orig?'Mostrar: Gemma 4 original':'Mostrar: Gemma 4 Neo (proposto)';
+  vis.innerHTML='';
+  for(let i=0;i<42;i++){
+    const d=document.createElement('div');
+    d.className='lyr';
+    const isG=GLOBALS.has(i);
+    const h=isG?52:28;
+    d.style.height=h+'px';
+    d.style.background=orig?COLORS_ORIG[i]:COLORS_NEO[i];
+    d.title=(orig?LABELS_ORIG:LABELS_NEO)[i];
+    d.addEventListener('mouseover',()=>{
+      document.getElementById('layer-info').textContent='';
+      document.getElementById('layer-detail').innerHTML='<strong>Layer '+i+'</strong> — '+(orig?LABELS_ORIG[i]:LABELS_NEO[i])+(isG?'<br><br><strong>MLP:</strong> 2560→10240→2560 '+(orig?'GELUTanh (denso)':'ReLU² + SpikeSparse (~65% zero) + per_layer_gate predictor'):' ');
+    });
+    vis.appendChild(d);
+  }
+}
+renderLayers();
+</script>

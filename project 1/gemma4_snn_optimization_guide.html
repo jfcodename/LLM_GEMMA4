@@ -1,0 +1,518 @@
+
+<h2 class="sr-only">Guia de otimização do Gemma 4 com princípios SNN e cérebro humano — técnicas testadas e implementáveis</h2>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+
+.tabs { display: flex; gap: 4px; border-bottom: 0.5px solid var(--color-border-secondary); margin-bottom: 20px; flex-wrap: wrap; }
+.tab { padding: 8px 16px; font-size: 13px; cursor: pointer; border: none; background: transparent; color: var(--color-text-secondary); border-bottom: 2px solid transparent; transition: all .15s; border-radius: 0; }
+.tab:hover { color: var(--color-text-primary); }
+.tab.active { color: var(--color-text-primary); border-bottom-color: var(--color-text-primary); font-weight: 500; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 16px 20px; margin-bottom: 12px; }
+.card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; white-space: nowrap; }
+.badge-teal { background: #E1F5EE; color: #0F6E56; }
+.badge-amber { background: #FAEEDA; color: #854F0B; }
+.badge-purple { background: #EEEDFE; color: #3C3489; }
+.badge-coral { background: #FAECE7; color: #993C1D; }
+.badge-blue { background: #E6F1FB; color: #185FA5; }
+.badge-green { background: #EAF3DE; color: #3B6D11; }
+@media (prefers-color-scheme: dark) {
+  .badge-teal { background: #04342C; color: #9FE1CB; }
+  .badge-amber { background: #412402; color: #FAC775; }
+  .badge-purple { background: #26215C; color: #CECBF6; }
+  .badge-coral { background: #4A1B0C; color: #F5C4B3; }
+  .badge-blue { background: #042C53; color: #B5D4F4; }
+  .badge-green { background: #173404; color: #C0DD97; }
+}
+
+.card h3 { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
+.card p, .card li { font-size: 13px; color: var(--color-text-secondary); line-height: 1.65; }
+.card ul { padding-left: 18px; margin-top: 6px; }
+.card li { margin-bottom: 3px; }
+
+.metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 10px; }
+.metric { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px; text-align: center; }
+.metric .val { font-size: 20px; font-weight: 500; color: var(--color-text-primary); }
+.metric .lbl { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+
+.layer-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.layer-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.layer-tag { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 10px; white-space: nowrap; flex-shrink: 0; margin-top: 2px; }
+.layer-info { flex: 1; }
+.layer-info strong { font-size: 13px; font-weight: 500; color: var(--color-text-primary); display: block; }
+.layer-info span { font-size: 12px; color: var(--color-text-secondary); }
+
+.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-green { background: #639922; }
+.dot-amber { background: #BA7517; }
+.dot-red { background: #E24B4A; }
+.status-text { font-size: 13px; color: var(--color-text-secondary); }
+
+.brain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .brain-grid { grid-template-columns: 1fr; } }
+
+.compare-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: var(--color-border-tertiary); border-radius: var(--border-radius-md); overflow: hidden; margin-top: 8px; }
+.compare-cell { background: var(--color-background-primary); padding: 10px 12px; font-size: 12px; color: var(--color-text-secondary); }
+.compare-cell.header { background: var(--color-background-secondary); font-weight: 500; font-size: 12px; color: var(--color-text-primary); }
+
+.priority-bar { height: 6px; border-radius: 3px; margin-top: 6px; }
+.btn-link { font-size: 12px; color: var(--color-text-info, #185FA5); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+
+.arch-highlight { background: var(--color-background-secondary); border-left: 3px solid #534AB7; border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0; padding: 10px 14px; margin: 8px 0; font-size: 12px; color: var(--color-text-secondary); }
+.arch-highlight strong { color: var(--color-text-primary); }
+</style>
+
+<div style="padding: 1rem 0">
+
+<div style="margin-bottom: 20px;">
+  <div style="font-size: 11px; color: var(--color-text-secondary); letter-spacing: .04em; margin-bottom: 4px;">GEMMA 4 · OTIMIZAÇÃO NEURO-INSPIRADA</div>
+  <div style="font-size: 22px; font-weight: 500; color: var(--color-text-primary); line-height: 1.3;">Do cérebro humano ao transformer</div>
+  <div style="font-size: 14px; color: var(--color-text-secondary); margin-top: 6px;">Mapeamento completo de princípios SNN aplicáveis à arquitetura Gemma 4</div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('brain')">Cérebro vs SNN</button>
+  <button class="tab" onclick="showTab('arch')">Gemma 4 hoje</button>
+  <button class="tab" onclick="showTab('quant')">Quantização</button>
+  <button class="tab" onclick="showTab('sparse')">Esparsidade</button>
+  <button class="tab" onclick="showTab('attn')">Atenção</button>
+  <button class="tab" onclick="showTab('snn')">SNN direto</button>
+  <button class="tab" onclick="showTab('roadmap')">Roadmap</button>
+</div>
+
+<!-- TAB: CÉREBRO vs SNN -->
+<div id="panel-brain" class="panel active">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-purple">Fundamentos</span><h3>7 princípios do cérebro que faltam nos transformers</h3></div>
+    <div class="brain-grid">
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">1. Event-driven (spike)</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Neurônio só transmite quando ativo. Transformers calculam <em>tudo</em>, sempre. SNN: ~95% dos neurônios silenciosos.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">2. Adições, não multiplicações</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Spikes são binários. MACs se tornam AC (Accumulate). Reduz energia 8–10× em hardware neuromorfico.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">3. Memória de trabalho limitada</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Hippocampus retém apenas tokens críticos. Análogo: KV cache seletivo — evictar tokens de baixa importância.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">4. Hierarquia de frequência</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Córtex visual processa local → global. Gemma já faz SWA+full-attention em camadas alternadas.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">5. Gating neuromodular</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Dopamina/serotonina modulam quais circuitos ativar. Análogo: MoE routing, per-layer gates.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">6. Codificação preditiva</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Cérebro transmite apenas <em>surpresa</em> (erro de previsão). Análogo: speculative decoding, delta caching.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">7. Temporalidade</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Informação codificada no <em>timing</em> dos spikes, não só na taxa de disparo. Análogo: RoPE + timestep multi-step.</div>
+      </div>
+      <div style="padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+        <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">+ Especialização de experts</div>
+        <div style="font-size: 12px; color: var(--color-text-secondary);">Áreas cerebrais se especializam. Broca vs Wernicke. Análogo direto: MoE — 128 experts, 2 ativos.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="badge badge-coral">Comparação</span><h3>SNN vs ANN vs Transformer — onde cada um ganha</h3></div>
+    <div class="compare-row">
+      <div class="compare-cell header">Dimensão</div>
+      <div class="compare-cell header">Cérebro / SNN</div>
+      <div class="compare-cell header">Transformer (Gemma 4)</div>
+      <div class="compare-cell">Compute</div>
+      <div class="compare-cell">AC (adição) · event-driven</div>
+      <div class="compare-cell">MAC (multiply-accumulate) denso</div>
+      <div class="compare-cell">Memória</div>
+      <div class="compare-cell">Cache seletivo · neurônios silenciosos</div>
+      <div class="compare-cell">KV cache cresce linear com contexto</div>
+      <div class="compare-cell">Esparsidade</div>
+      <div class="compare-cell">~95% natural · estrutural</div>
+      <div class="compare-cell">~0% natural (GELU denso)</div>
+      <div class="compare-cell">Latência</div>
+      <div class="compare-cell">Alta (biológica) · mas paralela</div>
+      <div class="compare-cell">Boa em GPU · ruim em CPU/edge</div>
+      <div class="compare-cell">Precisão</div>
+      <div class="compare-cell">Robusta ao ruído · imprecisa</div>
+      <div class="compare-cell">Alta precision FP16/BF16</div>
+      <div class="compare-cell">Flexibilidade</div>
+      <div class="compare-cell">Aprende continuamente</div>
+      <div class="compare-cell">Requer re-treinamento</div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: GEMMA 4 HOJE -->
+<div id="panel-arch" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-teal">Arquitetura</span><h3>O que Gemma 4 já tem de eficiente (da sua arquitetura)</h3></div>
+    <div class="arch-highlight"><strong>hidden_size=2560 · 42 camadas · vocab=262144 · MLP ratio=4×</strong><br>Visual tower (16L, d=768) · Audio tower (12L, d=1024) · Multimodal embedders</div>
+
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">✓ Já tem</span>
+      <div class="layer-info">
+        <strong>Hybrid SWA + Full Attention (cérebro: local→global)</strong>
+        <span>Camadas locais: q_proj=2048, k/v=512 · Camadas globais (cada 6ª): q=4096, k/v=1024. Análogo direto ao processamento hierárquico cortical.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">✓ Já tem</span>
+      <div class="layer-info">
+        <strong>Grouped Query Attention — GQA</strong>
+        <span>k_proj/v_proj muito menores que q_proj. Reduz KV cache significativamente. Local: 4:1 ratio. Global: 4:1 ratio.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">✓ Já tem</span>
+      <div class="layer-info">
+        <strong>Per-layer input gate (neuromodulação!)</strong>
+        <span>2560→256→2560 bottleneck por camada + RMSNorm. Análogo ao gating neuromodular. Aproveitar para pruning estruturado.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">✓ Já tem</span>
+      <div class="layer-info">
+        <strong>RMSNorm em todo lugar</strong>
+        <span>Pre/post attention, pre/post feedforward. Mais eficiente que LayerNorm. Permite quantização agressiva.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-amber">Parcial</span>
+      <div class="layer-info">
+        <strong>GELUTanh activation</strong>
+        <span>Mais suave que ReLU → menos esparsidade natural. Substituir por ReLU² ou SiLU aumenta esparsidade para ~30–50% sem retreino.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-coral">Faltando</span>
+      <div class="layer-info">
+        <strong>Nenhuma esparsidade de ativação intrínseca</strong>
+        <span>MLP gate_proj 2560→10240: todas as 10240 dimensões calculadas mesmo com ativação fraca. Potencial de pruning enorme.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-coral">Faltando</span>
+      <div class="layer-info">
+        <strong>KV cache sem evicção</strong>
+        <span>O KV cresce linearmente. Com o per_layer_input_gate já existente, é possível usar como oráculo de importância de token.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="badge badge-purple">Análise MLP</span><h3>Gargalo principal: os blocos MLP</h3></div>
+    <p style="margin-bottom: 10px;">Cada uma das 42 camadas tem gate_proj + up_proj + down_proj: <strong>2×(2560×10240) + 10240×2560 = ~157M params por camada</strong>. Total MLP ≈ 6.6B params de 42 camadas. Aqui está o maior potencial de compressão.</p>
+    <div class="metric-row">
+      <div class="metric"><div class="val">4×</div><div class="lbl">expansion ratio</div></div>
+      <div class="metric"><div class="val">10240</div><div class="lbl">intermediate dim</div></div>
+      <div class="metric"><div class="val">~50%</div><div class="lbl">pruning safe</div></div>
+      <div class="metric"><div class="val">2×</div><div class="lbl">speedup esperado</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: QUANTIZAÇÃO -->
+<div id="panel-quant" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-blue">Testado</span><h3>Quantização — estado da arte 2025</h3></div>
+
+    <div class="status-row"><span class="dot dot-green"></span><span class="status-text"><strong>W4A16 (NF4/GGUF/AWQ/GPTQ):</strong> 4× redução de memória. Gemma 4 27B → ~14GB. Acc degradação &lt;1%. Já disponível via unsloth/llama.cpp.</span></div>
+    <div class="status-row"><span class="dot dot-green"></span><span class="status-text"><strong>W8A8 (SmoothQuant):</strong> Acelera prefill e decode. 2× speedup. Bom ponto de equilíbrio.</span></div>
+    <div class="status-row"><span class="dot dot-green"></span><span class="status-text"><strong>NVFP4 (NVIDIA):</strong> Otimizado para H100/Blackwell. nvidia/Gemma-4-31B-IT-NVFP4 já existe. Máximo throughput em datacenter.</span></div>
+    <div class="status-row"><span class="dot dot-amber"></span><span class="status-text"><strong>W4A8 (QQQ/QuIP):</strong> Acelera ambas as fases. 3.67× kernel speedup vs FP16 GEMM. Acc degradação moderada em reasoning.</span></div>
+    <div class="status-row"><span class="dot dot-amber"></span><span class="status-text"><strong>KV cache INT8:</strong> Reduz memória de KV ~50%. Combinar com GQA já existente dá redução total de ~4–8×.</span></div>
+    <div class="status-row"><span class="dot dot-amber"></span><span class="status-text"><strong>KV cache INT4/FP8:</strong> Mais agressivo. Funciona bem com SnapKV/H2O (tokens importantes em FP8, resto descartado).</span></div>
+    <div class="status-row"><span class="dot dot-red"></span><span class="status-text"><strong>W2/Ternary:</strong> 16× compressão. Acc cai ~5–15%. QuIP# e AQLM tentam recuperar, mas ainda pesquisa.</span></div>
+
+    <div class="metric-row" style="margin-top: 14px;">
+      <div class="metric"><div class="val">4×</div><div class="lbl">memória W4A16</div></div>
+      <div class="metric"><div class="val">2.2×</div><div class="lbl">kernel speedup NF4</div></div>
+      <div class="metric"><div class="val">&lt;1%</div><div class="lbl">acc loss W4A16</div></div>
+      <div class="metric"><div class="val">14GB</div><div class="lbl">Gemma 27B em 4-bit</div></div>
+    </div>
+
+    <div style="margin-top: 14px; padding: 10px 14px; background: var(--color-background-secondary); border-radius: var(--border-radius-md);">
+      <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px;">Receita recomendada para Gemma 4 E2B/E4B hoje</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary);">Weights: AWQ INT4 · Activations: FP16 · KV cache: INT8 · Vision/Audio towers: INT8 separado. Total: ~4× memória, ~1.5–2× latência, acc perda &lt;1%.</div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: ESPARSIDADE -->
+<div id="panel-sparse" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-teal">Neuroinspired</span><h3>Esparsidade — o princípio mais cerebral</h3></div>
+    <p style="margin-bottom: 12px;">O cérebro opera com ~95% dos neurônios silenciosos a qualquer momento. Transformers padrão: 0%. Esta é a maior lacuna e maior oportunidade.</p>
+
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>SparseGPT / Wanda (unstructured, 50–60%)</strong>
+        <span>Zera pesos individualmente. SparseGPT: iterative weight update com Hessian. Wanda: magnitude × input activation, one-shot. 60% sparsidade com perplexidade quase igual.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>Structured pruning (MLP channels)</strong>
+        <span>Remove neurônios inteiros do MLP intermediate (10240→5120). Speedup real em CPU/GPU sem hardware especializado. Combina com quantização.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>ReLU LLMs (substituição de ativação)</strong>
+        <span>GELU→ReLU²: ativação vira esparsa naturalmente (~50–80% zeros). SparseGPT + ReLU: speedup real. Gemma usa GELUTanh — candidata ideal.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>Token sparsification (STATA)</strong>
+        <span>Descarta tokens de baixa importância durante forward pass. Em Spiking Transformers, timestep-wise anchor token garante precisão. Reduz FLOPs em 30–40%.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple">SNN puro</span>
+      <div class="layer-info">
+        <strong>SpikingBrain conversion pipeline</strong>
+        <span>Converte GELUTanh → adaptive spiking neurons. Threshold adaptativo por neurônio. 69% sparsidade de ativação. KV cache INT8. 1.5h/GPU de calibração.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-amber">Novo</span>
+      <div class="layer-info">
+        <strong>Per-layer gate como preditor de esparsidade</strong>
+        <span>O per_layer_input_gate (2560→256) já existe em Gemma 4. Usar a norma da saída como score de importância de neurônio → sparse MLP dinâmico sem retreino.</span>
+      </div>
+    </div>
+
+    <div class="metric-row" style="margin-top: 14px;">
+      <div class="metric"><div class="val">69%</div><div class="lbl">sparsidade SpikingBrain</div></div>
+      <div class="metric"><div class="val">60%</div><div class="lbl">sparsidade SparseGPT</div></div>
+      <div class="metric"><div class="val">97.7%</div><div class="lbl">redução energia SNN</div></div>
+      <div class="metric"><div class="val">15.4×</div><div class="lbl">speedup decode CPU</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: ATENÇÃO -->
+<div id="panel-attn" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-blue">Crítico</span><h3>Otimização de atenção e KV cache</h3></div>
+
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>FlashAttention 3</strong>
+        <span>Kernel fused para GPU. Evita materializar a matriz de atenção completa. Já essencial — usar com Triton para as camadas globais (q=4096).</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>H2O / SnapKV — KV eviction por atenção</strong>
+        <span>Descarta tokens com baixo peso de atenção acumulado. SnapKV: observa padrão de atenção no prefill e poda KV para decoding. 80–90% do KV descartável.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>RetroAttention / Quest (non-eviction sparse KV)</strong>
+        <span>Preserva KV completo mas carrega apenas tokens relevantes por step. Evita erros cumulativos de evicção. Top-k pages via similaridade Q×K summary.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>StreamingLLM (attention sink)</strong>
+        <span>Mantém tokens iniciais (sinks) + janela deslizante. Compatível com as camadas SWA de Gemma 4. Memória constante O(1) para contextos longos.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple">SNN</span>
+      <div class="layer-info">
+        <strong>Linear attention (O(n) vs O(n²))</strong>
+        <span>SpikingBrain-7B: substitui full-attention por linear attention + SWA interleaved. Gemma 4 já tem SWA local — converter as globais para linear seria o próximo passo.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-amber">Novo</span>
+      <div class="layer-info">
+        <strong>SALS — Sparse Attention in Latent Space</strong>
+        <span>Comprime KV no espaço latente antes de aplicar RoPE. Reduz rank efetivo do KV cache. Compatível com o RoPE do Gemma 4.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-teal">Testado</span>
+      <div class="layer-info">
+        <strong>PagedAttention (vLLM)</strong>
+        <span>Memória de KV em páginas não-contíguas. Reduz fragmentação. Fundamental para serving em produção. Já suportado para Gemma 4.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="badge badge-green">Speculative</span><h3>Codificação preditiva: speculative decoding</h3></div>
+    <p>Análogo cerebral da codificação preditiva: um modelo menor (draft) faz previsões, o maior (verifier) valida em paralelo. Para Gemma 4: usar E2B como draft do E4B/27B.</p>
+    <div class="metric-row" style="margin-top: 10px;">
+      <div class="metric"><div class="val">2–4×</div><div class="lbl">speedup típico</div></div>
+      <div class="metric"><div class="val">0%</div><div class="lbl">acc loss</div></div>
+      <div class="metric"><div class="val">E2B→E4B</div><div class="lbl">par ideal Gemma</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: SNN DIRETO -->
+<div id="panel-snn" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-purple">Pipeline SNN</span><h3>SpikingBrain: roteiro para converter Gemma 4</h3></div>
+    <p style="margin-bottom: 12px;">Baseado no resultado da Academia Chinesa de Ciências — converteram Qwen2.5-7B em 1.5h com ~2% do compute de treino do zero.</p>
+
+    <div class="layer-row">
+      <span class="layer-tag badge-purple" style="min-width: 60px; text-align: center;">Passo 1</span>
+      <div class="layer-info">
+        <strong>Continual pre-training (CPT) com extensão de contexto</strong>
+        <span>~150B tokens com janela longa. Estabiliza distribuições de ativação antes da conversão spiking. Para Gemma 4 E2B: ~50B tokens suficientes.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple" style="min-width: 60px; text-align: center;">Passo 2</span>
+      <div class="layer-info">
+        <strong>Converter full-attention → linear + SWA hybrid</strong>
+        <span>Camadas globais (posições 5,11,17,23,29,35,41 em Gemma 4) → linear attention. Camadas locais SWA mantidas. Treino lightweight para recuperar acc.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple" style="min-width: 60px; text-align: center;">Passo 3</span>
+      <div class="layer-info">
+        <strong>Adaptive spiking neurons (substituição de GELUTanh)</strong>
+        <span>Threshold por neurônio calibrado em dataset pequeno. Fase 1 (otimização): conta inteira de spikes. Fase 2 (inferência): expande em spike train esparso binário.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple" style="min-width: 60px; text-align: center;">Passo 4</span>
+      <div class="layer-info">
+        <strong>Quantização pós-spiking: weights + KV cache → INT8</strong>
+        <span>Após calibração de threshold, quantizar pesos. KV cache INT8. Conjunto: spike sparsity + quantização = redução de energia até 97.7%.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple" style="min-width: 60px; text-align: center;">Passo 5</span>
+      <div class="layer-info">
+        <strong>SFT final para recuperar accuracy</strong>
+        <span>Fine-tuning supervisionado em dados de instrução. Recupera degradação residual. SpikingBrain reporta competitivo vs Qwen2.5 base em benchmarks padrão.</span>
+      </div>
+    </div>
+
+    <div class="metric-row" style="margin-top: 14px;">
+      <div class="metric"><div class="val">69%</div><div class="lbl">sparsidade ativação</div></div>
+      <div class="metric"><div class="val">1.5h</div><div class="lbl">calibração 1 GPU</div></div>
+      <div class="metric"><div class="val">&lt;2%</div><div class="lbl">compute vs treino zero</div></div>
+      <div class="metric"><div class="val">15.4×</div><div class="lbl">decode speedup CPU</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="badge badge-coral">Atenção</span><h3>Limitações e riscos do pipeline SNN</h3></div>
+    <div class="status-row"><span class="dot dot-amber"></span><span class="status-text">Ganho de energia real só em hardware neuromorfico (Intel Loihi 2, IBM NorthPole). Em GPU NVIDIA convencional, o benefício é via esparsidade computacional, não eliminação de MACs.</span></div>
+    <div class="status-row"><span class="dot dot-amber"></span><span class="status-text">Acc em reasoning/math pode degradar com linear attention. SpikingBrain-76B (MoE híbrido) preserva melhor que o 7B puro.</span></div>
+    <div class="status-row"><span class="dot dot-red"></span><span class="status-text">Gemma 4 multimodal (vision + audio) complica: towers precisam de conversão separada ou manter em FP16/INT8 clássico.</span></div>
+  </div>
+</div>
+
+<!-- TAB: ROADMAP -->
+<div id="panel-roadmap" class="panel">
+  <div class="card">
+    <div class="card-header"><span class="badge badge-green">Roadmap</span><h3>Prioridade de implementação para Gemma 4</h3></div>
+    <p style="margin-bottom: 14px;">Ordenado por impacto × facilidade × disponibilidade de ferramentas.</p>
+
+    <div class="layer-row">
+      <span class="layer-tag badge-green">Agora</span>
+      <div class="layer-info">
+        <strong>1. AWQ/GGUF INT4 + KV cache INT8</strong>
+        <span>Zero retreino. unsloth + llama.cpp. 4× memória, ~1.5–2× latência. Disponível hoje para todos os tamanhos Gemma 4.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-green">Agora</span>
+      <div class="layer-info">
+        <strong>2. vLLM com PagedAttention + SnapKV</strong>
+        <span>Para serving em produção. Continuous batching + KV eviction. Sem mudança de pesos. Efeito imediato em throughput.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-green">Agora</span>
+      <div class="layer-info">
+        <strong>3. Speculative decoding E2B → E4B/27B</strong>
+        <span>2–4× speedup com acc idêntica. Par natural Gemma 4. Exige apenas infra de serving correta.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-amber">1–2 semanas</span>
+      <div class="layer-info">
+        <strong>4. SparseGPT/Wanda 50% nos blocos MLP</strong>
+        <span>Uma GPU, ~4h para 7B. Estrutura do Gemma 4 (gate_proj + up_proj) permite pruning estruturado por canal. Combinar com INT4 = 8× compressão total.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-amber">2–4 semanas</span>
+      <div class="layer-info">
+        <strong>5. ReLU² / GELUTanh → SiLU sparse + threshold gate</strong>
+        <span>Usar per_layer_input_gate existente como preditor. Calibrar threshold para 40–60% sparsidade. Fine-tuning leve para recuperar acc.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-purple">1–3 meses</span>
+      <div class="layer-info">
+        <strong>6. SpikingBrain full conversion pipeline</strong>
+        <span>Converter camadas globais → linear attention. Adaptive spiking neurons. CPT + SFT. Impacto máximo para edge/CPU deployment.</span>
+      </div>
+    </div>
+    <div class="layer-row">
+      <span class="layer-tag badge-coral">Pesquisa</span>
+      <div class="layer-info">
+        <strong>7. Hardware neuromorfico (Loihi 2 / NorthPole)</strong>
+        <span>Ganho de energia máximo (97.7%) só com hardware dedicado. Requer re-engenharia de pipeline de inferência. Horizonte 6–18 meses.</span>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px; padding: 12px 16px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md);">
+      <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 6px;">Combinação ótima para hoje (sem retreino)</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.7;">
+        AWQ W4A16 + KV INT8 + SnapKV + FlashAttention 3 + vLLM PagedAttention<br>
+        <strong style="color: var(--color-text-primary);">Resultado esperado:</strong> 4–6× menos memória · 2–3× menos latência · &lt;1% acc loss
+      </div>
+    </div>
+    <div style="margin-top: 8px; padding: 12px 16px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md);">
+      <div style="font-size: 12px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 6px;">Combinação máxima (com retreino leve)</div>
+      <div style="font-size: 12px; color: var(--color-text-secondary); line-height: 1.7;">
+        SpikingBrain conversion + W4A8 + KV INT4 + linear attention + token sparsification<br>
+        <strong style="color: var(--color-text-primary);">Resultado esperado:</strong> 10–20× menos energia · 5–15× speedup decode CPU · ~2–5% acc loss em reasoning
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('panel-'+id).classList.add('active');
+}
+</script>

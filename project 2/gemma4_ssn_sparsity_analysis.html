@@ -1,0 +1,225 @@
+
+<style>
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1rem 1.25rem; margin-bottom: 12px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 4px; }
+.b-green { background: var(--color-background-success); color: var(--color-text-success); }
+.b-amber { background: var(--color-background-warning); color: var(--color-text-warning); }
+.b-red   { background: var(--color-background-danger);  color: var(--color-text-danger); }
+.b-info  { background: var(--color-background-info);    color: var(--color-text-info); }
+.layer-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 0.5px solid var(--color-border-tertiary); font-size: 13px; }
+.layer-row:last-child { border-bottom: none; }
+.layer-name { flex: 1; color: var(--color-text-primary); font-family: var(--font-mono); font-size: 12px; }
+.layer-dims { min-width: 160px; color: var(--color-text-secondary); font-size: 11px; }
+.layer-note { min-width: 160px; color: var(--color-text-secondary); font-size: 11px; }
+h3 { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin: 0 0 10px; }
+.section-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-text-tertiary); margin: 0 0 8px; }
+.bar-wrap { height: 8px; background: var(--color-background-secondary); border-radius: 4px; flex: 1; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; }
+.metric-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+.metric-label { min-width: 130px; color: var(--color-text-secondary); }
+</style>
+
+<div class="card">
+  <p class="section-label">Alvo de esparsidade: N:M estruturado (2:4) + unstructured L1</p>
+  <h3>Compatibilidade dimensional — requisito: múltiplo de 8 (ideal 16+) para Sparse Tensor Cores</h3>
+  <div class="layer-row" style="font-weight:500; color: var(--color-text-secondary); font-size:11px;">
+    <span class="layer-name">Camada</span>
+    <span class="layer-dims">Dimensões (in→out)</span>
+    <span style="min-width:80px;font-size:11px;">Compatível</span>
+    <span class="layer-note">Observação</span>
+  </div>
+
+  <div class="layer-row">
+    <span class="layer-name">Text q_proj (local)</span>
+    <span class="layer-dims">2560 → 2048</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">Ambas múltiplas de 256</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Text q_proj (global)</span>
+    <span class="layer-dims">2560 → 4096</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">Cabeças extras, dims ok</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Text k_proj / v_proj (local)</span>
+    <span class="layer-dims">2560 → 512</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">GQA reduzido mas múltiplo de 16</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Text gate_proj / up_proj</span>
+    <span class="layer-dims">2560 → 10240</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">FFN principal — alvo primário</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">per_layer_input_gate</span>
+    <span class="layer-dims">2560 → 256</span>
+    <span style="min-width:80px"><span class="badge b-amber">Cuidado</span></span>
+    <span class="layer-note">Pequena, impacto de esparsidade alto</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">per_layer_projection</span>
+    <span class="layer-dims">256 → 2560</span>
+    <span style="min-width:80px"><span class="badge b-amber">Cuidado</span></span>
+    <span class="layer-note">Bottleneck — risco de degradação</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Vision q/k/v/o_proj</span>
+    <span class="layer-dims">768 → 768</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">Já tem Gemma4ClippableLinear</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Vision gate/up/down_proj</span>
+    <span class="layer-dims">768 ↔ 3072</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">4x expansion, dims limpas</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Audio feed_forward</span>
+    <span class="layer-dims">1024 ↔ 4096</span>
+    <span style="min-width:80px"><span class="badge b-green">OK 2:4</span></span>
+    <span class="layer-note">Conformer FFN, dims ok</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Audio depthwise Conv1d</span>
+    <span class="layer-dims">1024 groups</span>
+    <span style="min-width:80px"><span class="badge b-red">Incomp.</span></span>
+    <span class="layer-note">Depthwise conv ≠ matmul sparse</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">Audio subsample Conv2d</span>
+    <span class="layer-dims">1→128, 128→32</span>
+    <span style="min-width:80px"><span class="badge b-red">Incomp.</span></span>
+    <span class="layer-note">Conv2d não suporta 2:4 TC nativo</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">embed_tokens / lm_head</span>
+    <span class="layer-dims">262144 × 2560</span>
+    <span style="min-width:80px"><span class="badge b-amber">Skip</span></span>
+    <span class="layer-note">Lookup table — não aplicar</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name">embed_tokens_per_layer</span>
+    <span class="layer-dims">262144 × 10752</span>
+    <span style="min-width:80px"><span class="badge b-amber">Skip</span></span>
+    <span class="layer-note">Escalar até 10752 é incomum</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Estimativa de cobertura de esparsidade por módulo</h3>
+  <div class="metric-row">
+    <span class="metric-label">Text FFN (gate/up/down)</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:92%;background:#1D9E75"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">~92%</span>
+  </div>
+  <div class="metric-row">
+    <span class="metric-label">Text Attention (q/k/v/o)</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:85%;background:#1D9E75"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">~85%</span>
+  </div>
+  <div class="metric-row">
+    <span class="metric-label">per_layer gate/proj</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:40%;background:#BA7517"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">~40%</span>
+  </div>
+  <div class="metric-row">
+    <span class="metric-label">Vision encoder</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:88%;background:#1D9E75"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">~88%</span>
+  </div>
+  <div class="metric-row">
+    <span class="metric-label">Audio FFN / Attn linear</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:75%;background:#1D9E75"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">~75%</span>
+  </div>
+  <div class="metric-row">
+    <span class="metric-label">Audio conv (excluído)</span>
+    <div class="bar-wrap"><div class="bar-fill" style="width:0%;background:#A32D2D"></div></div>
+    <span style="font-size:12px;min-width:40px;color:var(--color-text-secondary)">0%</span>
+  </div>
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:8px 0 0">Cobertura total estimada de parâmetros elegíveis: ~83% dos pesos Linear</p>
+</div>
+
+<div class="card">
+  <h3>Estratégia de transferência de pesos (dense → sparse)</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px;">
+    <div style="padding:10px;background:var(--color-background-secondary);border-radius:8px;">
+      <div style="font-weight:500;margin-bottom:6px;color:var(--color-text-primary)">2:4 structured (NVIDIA ASP)</div>
+      <div style="color:var(--color-text-secondary);line-height:1.6">
+        ✓ magnitude pruning direto nos pesos treinados<br>
+        ✓ sem retreino — aplicar post-hoc<br>
+        ✓ 2x speedup garantido em Ampere+<br>
+        ✗ degradação ~1–3% sem fine-tuning<br>
+        ✗ 2:4 colapsa reasoning em alguns modelos (Qwen3: 54→15%)
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--color-background-secondary);border-radius:8px;">
+      <div style="font-weight:500;margin-bottom:6px;color:var(--color-text-primary)">Unstructured L1 (Sakana+NVIDIA)</div>
+      <div style="color:var(--color-text-secondary);line-height:1.6">
+        ✓ preserva acurácia com &gt;90% esparsidade<br>
+        ✓ L1 reg. + fine-tuning nos pesos existentes<br>
+        ✓ mais flexível — sem restrição de padrão<br>
+        ✗ precisa de kernels CUDA customizados<br>
+        ✗ speedup depende de implementação
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--color-background-secondary);border-radius:8px;">
+      <div style="font-weight:500;margin-bottom:6px;color:var(--color-text-primary)">6:8 / SlideSparse</div>
+      <div style="color:var(--color-text-secondary);line-height:1.6">
+        ✓ 75% de não-zeros, quase sem perda<br>
+        ✓ decompõe em janelas 2:4 compatíveis<br>
+        ✓ preenche gap entre dense e 2:4<br>
+        ✗ requer SlideSparse runtime<br>
+        ✗ ainda experimental
+      </div>
+    </div>
+    <div style="padding:10px;background:var(--color-background-secondary);border-radius:8px;">
+      <div style="font-weight:500;margin-bottom:6px;color:var(--color-text-primary)">Gemma4ClippableLinear</div>
+      <div style="color:var(--color-text-secondary);line-height:1.6">
+        ✓ vision + audio já têm wrapper de clip<br>
+        ✓ mecanismo de mascaramento já existe<br>
+        ✓ pode ser estendido para sparse mask<br>
+        ✗ text layers usam Linear puro<br>
+        ✗ precisa refatorar text decoder
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Veredicto de viabilidade por caminho</h3>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">FFN text (42 layers × 3 projs)</span>
+    <span style="min-width:100px"><span class="badge b-green">Alta viabilidade</span></span>
+    <span class="layer-note">Alvo primário, dims perfeitas, maior ganho</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">Attention text + vision</span>
+    <span style="min-width:100px"><span class="badge b-green">Alta viabilidade</span></span>
+    <span class="layer-note">GQA com k_proj 512 ainda ok</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">per_layer_input_gate (256)</span>
+    <span style="min-width:100px"><span class="badge b-amber">Cautela</span></span>
+    <span class="layer-note">Skip ou esparsidade &lt;50% nessas</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">Audio FFN / attn linears</span>
+    <span style="min-width:100px"><span class="badge b-green">Viável</span></span>
+    <span class="layer-note">Conformer FFN responde bem</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">Audio conv1d / conv2d</span>
+    <span style="min-width:100px"><span class="badge b-red">Excluir</span></span>
+    <span class="layer-note">Não mapeiam para Sparse TC</span>
+  </div>
+  <div class="layer-row">
+    <span class="layer-name" style="font-size:13px">Embeddings + lm_head</span>
+    <span style="min-width:100px"><span class="badge b-amber">Skip</span></span>
+    <span class="layer-note">Lookup — esparsidade não ajuda aqui</span>
+  </div>
+</div>
