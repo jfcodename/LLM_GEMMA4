@@ -195,13 +195,24 @@ def run_real_model_analysis():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"    Parâmetros totais: {total_params/1e9:.2f}B")
 
-    # Detectar KV sharing
+    # Detectar KV sharing — busca por submodules, não por path string
     kv_own = []
     kv_shared = []
+    named_modules_dict = dict(model.named_modules())
     for i in range(42):
-        layer_path = f"model.layers.{i}.self_attn"
-        has_k = any(n.startswith(layer_path + ".k_proj") for n, _ in model.named_parameters())
-        if has_k:
+        # Tenta vários patterns que o HF pode usar
+        found_k = False
+        for pattern in [
+            f"model.language_model.layers.{i}.self_attn.k_proj",
+            f"model.language_model.model.layers.{i}.self_attn.k_proj",
+            f"language_model.model.layers.{i}.self_attn.k_proj",
+            f"language_model.layers.{i}.self_attn.k_proj",
+            f"model.layers.{i}.self_attn.k_proj",
+        ]:
+            if pattern in named_modules_dict:
+                found_k = True
+                break
+        if found_k:
             kv_own.append(i)
         else:
             kv_shared.append(i)
@@ -209,8 +220,21 @@ def run_real_model_analysis():
     print(f"    Layers com KV próprio: {len(kv_own)} ({kv_own[:5]}...)")
     print(f"    Layers com KV shared:  {len(kv_shared)} ({kv_shared[:5]}...)")
 
+    # Debug: mostra path da layer 0 para validar
+    for name, _ in model.named_modules():
+        if "layers.0.self_attn" in name and name.endswith("k_proj"):
+            print(f"    [DEBUG] k_proj path: {name}")
+            break
+    else:
+        # Se não achou k_proj na layer 0, mostra attn modules para debug
+        print(f"    [DEBUG] Buscando self_attn na layer 0...")
+        for name, _ in model.named_modules():
+            if "layers.0.self_attn" in name and not any(x in name for x in ["norm", "gate"]):
+                print(f"      → {name}")
+
     # ── Medir esparsidade natural de ativações ────────────────────────────
-    logger.info("Medindo esparsidade natural de ativações...")
+    # Usa forward() único em vez de generate() — 50x mais rápido
+    logger.info("Medindo esparsidade natural de ativações (forward pass único)...")
     prompt = "Explain the concept of neural network sparsity in detail."
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
@@ -220,7 +244,11 @@ def run_real_model_analysis():
         def hook(module, input, output):
             if isinstance(output, torch.Tensor):
                 zero_frac = (output == 0).float().mean().item()
-                activation_stats[name] = zero_frac
+                near_zero = (output.abs() < 1e-6).float().mean().item()
+                activation_stats[name] = {
+                    "exact_zero": zero_frac,
+                    "near_zero": near_zero,
+                }
         return hook
 
     hooks = []
@@ -228,19 +256,43 @@ def run_real_model_analysis():
         if isinstance(module, torch.nn.Linear) and "mlp" in name:
             hooks.append(module.register_forward_hook(make_hook(name)))
 
+    # Forward pass único (sem generate loop) — muito mais rápido
     with torch.inference_mode():
-        output = model.generate(**inputs, max_new_tokens=50, do_sample=False)
+        _ = model(**inputs)
 
     for h in hooks:
         h.remove()
 
     if activation_stats:
-        avg_sp = sum(activation_stats.values()) / len(activation_stats)
-        top5 = sorted(activation_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+        avg_exact = sum(v["exact_zero"] for v in activation_stats.values()) / len(activation_stats)
+        avg_near = sum(v["near_zero"] for v in activation_stats.values()) / len(activation_stats)
+
+        # Separar por tipo de projeção
+        gate_stats = {k: v for k, v in activation_stats.items() if "gate_proj" in k}
+        up_stats = {k: v for k, v in activation_stats.items() if "up_proj" in k}
+        down_stats = {k: v for k, v in activation_stats.items() if "down_proj" in k}
+
         print(f"\n  ESPARSIDADE NATURAL DE ATIVAÇÕES (MLP):")
-        print(f"    Média: {avg_sp:.1%}")
-        for name, sp in top5:
-            print(f"    {name[-60:]:<60} {sp:.1%}")
+        print(f"    Total layers analisados: {len(activation_stats)}")
+        print(f"    Zeros exatos (média):    {avg_exact:.1%}")
+        print(f"    Near-zero <1e-6 (média): {avg_near:.1%}")
+
+        if gate_stats:
+            avg_gate = sum(v["exact_zero"] for v in gate_stats.values()) / len(gate_stats)
+            print(f"    gate_proj zeros:         {avg_gate:.1%} ({len(gate_stats)} layers)")
+        if up_stats:
+            avg_up = sum(v["exact_zero"] for v in up_stats.values()) / len(up_stats)
+            print(f"    up_proj zeros:           {avg_up:.1%} ({len(up_stats)} layers)")
+        if down_stats:
+            avg_down = sum(v["exact_zero"] for v in down_stats.values()) / len(down_stats)
+            print(f"    down_proj zeros:          {avg_down:.1%} ({len(down_stats)} layers)")
+
+        # Top 5 mais esparsos
+        top5 = sorted(activation_stats.items(), key=lambda x: x[1]["exact_zero"], reverse=True)[:5]
+        print(f"\n    Top 5 mais esparsos:")
+        for name, stats in top5:
+            short = name.split(".")[-3] + "." + name.split(".")[-1] if "." in name else name
+            print(f"      {short:<40} {stats['exact_zero']:.1%}")
 
     # ── Benchmark rápido ──────────────────────────────────────────────────
     logger.info("Benchmark rápido (baseline)...")
@@ -252,12 +304,13 @@ def run_real_model_analysis():
         model.generate(**inputs, max_new_tokens=10, do_sample=False)
     torch.cuda.synchronize()
 
-    # Measure
+    # Measure — 2 runs com 50 tokens (mais rápido no T4)
     times = []
-    for _ in range(3):
+    for _ in range(2):
+        torch.cuda.reset_peak_memory_stats()
         t0 = time.perf_counter()
         with torch.inference_mode():
-            out = model.generate(**inputs, max_new_tokens=100, do_sample=False)
+            out = model.generate(**inputs, max_new_tokens=50, do_sample=False)
         torch.cuda.synchronize()
         times.append(time.perf_counter() - t0)
 
