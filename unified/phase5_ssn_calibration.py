@@ -208,11 +208,11 @@ def main():
             # O forward triggera a acumulação de loss dentro dos wrappers
             _ = model(**inputs)
             
-            # Somar a loss de todos os layers
+            # Somar a loss de todos os layers resolvendo possível espalhamento em multi-GPU (device_map)
             total_loss = torch.tensor(0.0, device=model.device)
             for w in wrappers:
-                # current_loss já é a soma do batch inteiro para aquele layer
-                total_loss += w.current_loss
+                # Move a loss local daquela camada para o device principal antes de somar
+                total_loss += w.current_loss.to(model.device)
                 
             total_loss.backward()
             optimizer.step()
