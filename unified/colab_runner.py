@@ -296,15 +296,25 @@ def run_real_model_analysis():
 
     # ── Benchmark rápido ──────────────────────────────────────────────────
     logger.info("Benchmark rápido (baseline)...")
-    prompt = "What is the capital of France?"
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+    # E4B-it requer chat template para gerar respostas corretas
+    chat_prompt = "What is the capital of France?"
+    chat = [{"role": "user", "content": chat_prompt}]
+    try:
+        formatted = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+        inputs = tokenizer(formatted, return_tensors="pt").to(model.device)
+        print(f"\n    [Chat template aplicado]")
+    except Exception:
+        # Fallback se chat template não disponível
+        inputs = tokenizer(chat_prompt, return_tensors="pt").to(model.device)
+        print(f"\n    [Chat template não disponível, usando raw]")
 
     # Warmup
     with torch.inference_mode():
         model.generate(**inputs, max_new_tokens=10, do_sample=False)
     torch.cuda.synchronize()
 
-    # Measure — 2 runs com 50 tokens (mais rápido no T4)
+    # Measure — 2 runs com 50 tokens
     times = []
     for _ in range(2):
         torch.cuda.reset_peak_memory_stats()
@@ -326,8 +336,8 @@ def run_real_model_analysis():
     print(f"    Throughput:     {tps:.1f} tok/s")
     print(f"    VRAM peak:      {mem_used:.2f} GB")
 
-    decoded = tokenizer.decode(out[0], skip_special_tokens=True)
-    print(f"    Output: {decoded[:200]}...")
+    decoded = tokenizer.decode(out[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+    print(f"    Output: {decoded[:300]}")
 
     print(f"\n{'═'*60}\n")
     return 0
