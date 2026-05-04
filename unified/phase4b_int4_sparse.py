@@ -1,273 +1,181 @@
 """
-Gemma 4 E4B — INT4 Quantization + Sparsity
-=============================================
-Usa torchao (nativo PyTorch 2.11+) para quantização INT4.
-Sem dependência de bitsandbytes ou CUDA libs externas.
-
-Fallback para INT8 dynamic se INT4 falhar.
+Gemma 4 E4B — GGUF Quantized Benchmark
+========================================
+Usa llama-cpp-python para carregar GGUF pré-quantizado do Unsloth.
+Compara throughput GGUF Q4/Q8 vs nosso bf16+sparsity.
 
 Uso no Kaggle:
+    !CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python -q --no-cache-dir
+    !pip install huggingface_hub -q
     !python unified/phase4b_int4_sparse.py
 """
 
-import logging, sys, time, gc
+import logging, sys, time, os
 from pathlib import Path
-
-import torch
-import torch.nn as nn
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger(__name__)
 
+# Quant files to test (smallest first for T4)
+GGUF_REPO = "unsloth/gemma-4-E4B-it-GGUF"
+GGUF_VARIANTS = [
+    ("Q4_K_M", "gemma-4-E4B-it-Q4_K_M.gguf", "~5 GB"),
+    ("Q8_0",   "gemma-4-E4B-it-Q8_0.gguf",   "~8.5 GB"),
+]
 
-def benchmark_generate(model, tokenizer, prompts, max_new_tokens=50):
-    """Benchmark com chat template."""
+PROMPTS = [
+    "What is the capital of France?",
+    "Explain quantum computing in simple terms.",
+    "Write a Python function to calculate fibonacci numbers.",
+]
+
+# Our previous bf16 results for comparison
+BF16_RESULTS = {
+    "bf16 denso":            {"tps": 8.5, "sparsity": "0%",    "quality": "perfect"},
+    "bf16 + Top-K 50%":      {"tps": 7.1, "sparsity": "50%",   "quality": "perfect"},
+    "bf16 + 6:8 + Top-K 50%":{"tps": 7.2, "sparsity": "62.5%", "quality": "perfect"},
+}
+
+
+def download_gguf(filename):
+    """Download GGUF file from HuggingFace."""
+    from huggingface_hub import hf_hub_download
+    cache_dir = "/kaggle/working/gguf_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+
+    logger.info(f"Baixando {filename}...")
+    path = hf_hub_download(
+        repo_id=GGUF_REPO,
+        filename=filename,
+        cache_dir=cache_dir,
+        local_dir=cache_dir,
+    )
+    logger.info(f"Download completo: {path}")
+    return path
+
+
+def benchmark_llama_cpp(model_path, prompts, n_gpu_layers=-1, max_tokens=50):
+    """Benchmark usando llama-cpp-python."""
+    from llama_cpp import Llama
+
+    logger.info(f"Carregando {Path(model_path).name}...")
+    t_load = time.perf_counter()
+
+    llm = Llama(
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,  # -1 = all layers on GPU
+        n_ctx=2048,
+        verbose=False,
+    )
+
+    load_time = time.perf_counter() - t_load
+    logger.info(f"Modelo carregado em {load_time:.1f}s")
+
     results = []
     for prompt in prompts:
+        # Format as chat
         messages = [{"role": "user", "content": prompt}]
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(text, return_tensors="pt").to(model.device)
-        input_len = inputs["input_ids"].shape[-1]
 
-        torch.cuda.synchronize()
         t0 = time.perf_counter()
-
-        with torch.inference_mode():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                temperature=1.0,
-            )
-
-        torch.cuda.synchronize()
+        response = llm.create_chat_completion(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
         elapsed = time.perf_counter() - t0
 
-        gen_ids = out[0][input_len:]
-        n_tok = len(gen_ids)
+        text = response["choices"][0]["message"]["content"]
+        n_tok = response["usage"]["completion_tokens"]
         tps = n_tok / elapsed if elapsed > 0 else 0
-        text_out = tokenizer.decode(gen_ids, skip_special_tokens=True)
 
         results.append({
             "prompt": prompt[:50],
             "tok_per_s": tps,
             "n_tokens": n_tok,
             "elapsed": elapsed,
-            "output": text_out[:120],
+            "output": text[:120] if text else "(empty)",
         })
 
-        short = prompt[:50].ljust(50)
         print(f"      {tps:.1f} tok/s | {n_tok} tok | {elapsed:.2f}s")
-        print(f"      → {text_out[:100]}\n")
+        print(f"      → {(text or '(empty)')[:100]}\n")
+
+    # Cleanup
+    del llm
 
     return results
 
 
-def try_torchao_int4(model):
-    """Tenta quantização INT4 via torchao."""
-    try:
-        import torchao
-        from torchao.quantization import int4_weight_only
-        logger.info("torchao encontrado, aplicando INT4 weight-only...")
-        torchao.quantize_(model, int4_weight_only(group_size=128))
-        return True, "torchao INT4"
-    except ImportError:
-        logger.info("torchao não disponível")
-        return False, None
-    except Exception as e:
-        logger.warning(f"torchao INT4 falhou: {e}")
-        return False, None
-
-
-def try_torch_dynamic_int8(model):
-    """Fallback: quantização dinâmica INT8 nativa do PyTorch."""
-    try:
-        logger.info("Tentando quantização dinâmica INT8 (torch.ao)...")
-        quantized = torch.ao.quantization.quantize_dynamic(
-            model.language_model if hasattr(model, 'language_model') else model,
-            {nn.Linear},
-            dtype=torch.qint8,
-        )
-        if hasattr(model, 'language_model'):
-            model.language_model = quantized
-        return True, "dynamic INT8"
-    except Exception as e:
-        logger.warning(f"INT8 dinâmico falhou: {e}")
-        return False, None
-
-
-def try_manual_fp16_quant(model):
-    """Fallback 2: converter bf16 → fp16 (menor precisão, sem lib extra)."""
-    try:
-        logger.info("Convertendo bf16 → fp16...")
-        model.half()
-        return True, "fp16"
-    except Exception as e:
-        logger.warning(f"fp16 falhou: {e}")
-        return False, None
-
-
-def try_quanto(model):
-    """Tenta quantização via optimum-quanto."""
-    try:
-        from optimum.quanto import quantize, qint4
-        logger.info("quanto encontrado, aplicando qint4...")
-        quantize(model, weights=qint4)
-        return True, "quanto INT4"
-    except ImportError:
-        logger.info("optimum-quanto não disponível")
-        return False, None
-    except Exception as e:
-        logger.warning(f"quanto falhou: {e}")
-        return False, None
-
-
 def main():
-    if not torch.cuda.is_available():
-        logger.error("GPU necessária")
-        return 1
-
-    gpu = torch.cuda.get_device_name(0)
-    vram_total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
     print(f"\n{'═'*60}")
-    print(f"  INT4/INT8 QUANTIZATION + SPARSITY")
-    print(f"  GPU: {gpu} ({vram_total:.1f} GB)")
-    print(f"  PyTorch: {torch.__version__}")
+    print(f"  GGUF QUANTIZED BENCHMARK")
+    print(f"  Repo: {GGUF_REPO}")
     print(f"{'═'*60}\n")
 
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    model_id = "google/gemma-4-e4b-it"
-
-    prompts = [
-        "What is the capital of France?",
-        "Explain quantum computing in simple terms.",
-        "Write a Python function to calculate fibonacci numbers.",
-    ]
-
-    # ═══════════════════════════════════════════════════════════════
-    # BASELINE bf16
-    # ═══════════════════════════════════════════════════════════════
-
-    logger.info(f"Carregando {model_id} (bf16)...")
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, torch_dtype=torch.bfloat16,
-        device_map="auto", low_cpu_mem_usage=True,
-    )
-    model.eval()
-
-    vram_bf16 = torch.cuda.max_memory_allocated() / (1024**3)
-    print(f"\n{'─'*60}")
-    print(f"  BASELINE bf16 (VRAM: {vram_bf16:.2f} GB)")
-    print(f"{'─'*60}")
-
-    bf16_results = benchmark_generate(model, tokenizer, prompts)
-    bf16_tps = sum(r["tok_per_s"] for r in bf16_results) / len(bf16_results)
-
-    # ═══════════════════════════════════════════════════════════════
-    # TRY QUANTIZATION (cascata de fallbacks)
-    # ═══════════════════════════════════════════════════════════════
-
-    print(f"\n{'─'*60}")
-    print(f"  TENTANDO QUANTIZAÇÃO...")
-    print(f"{'─'*60}")
-
-    # Tentar em ordem de preferência
-    quant_success = False
-    quant_method = None
-
-    for try_fn in [try_torchao_int4, try_quanto, try_torch_dynamic_int8, try_manual_fp16_quant]:
-        success, method = try_fn(model)
-        if success:
-            quant_success = True
-            quant_method = method
-            break
-
-    if not quant_success:
-        print("  ❌ Nenhum método de quantização funcionou")
+    # Check llama-cpp-python
+    try:
+        from llama_cpp import Llama
+        logger.info("llama-cpp-python encontrado ✅")
+    except ImportError:
+        print("  ❌ llama-cpp-python não instalado!")
+        print("  Instale com CUDA:")
+        print("    CMAKE_ARGS=\"-DGGML_CUDA=on\" pip install llama-cpp-python --no-cache-dir")
+        print("  Ou sem CUDA (CPU only):")
+        print("    pip install llama-cpp-python")
         return 1
 
-    torch.cuda.empty_cache()
-    vram_quant = torch.cuda.max_memory_allocated() / (1024**3)
-    print(f"\n  ✅ Quantização: {quant_method}")
-    print(f"  VRAM: {vram_quant:.2f} GB (vs {vram_bf16:.2f} bf16)")
-    print(f"  Compressão VRAM: {vram_bf16/max(vram_quant,0.1):.1f}×")
-
-    # Benchmark quantizado denso
-    print(f"\n{'─'*60}")
-    print(f"  {quant_method.upper()} DENSO")
-    print(f"{'─'*60}")
-
-    quant_results = benchmark_generate(model, tokenizer, prompts)
-    quant_tps = sum(r["tok_per_s"] for r in quant_results) / len(quant_results)
-
-    # ═══════════════════════════════════════════════════════════════
-    # QUANTIZADO + TOP-K 50%
-    # ═══════════════════════════════════════════════════════════════
-
-    print(f"\n{'─'*60}")
-    print(f"  {quant_method.upper()} + TOP-K 50%")
-    print(f"{'─'*60}")
-
+    # Check GPU
     try:
-        from unified.phase1b_topk import TopKMaskedMLP
+        import torch
+        if torch.cuda.is_available():
+            gpu = torch.cuda.get_device_name(0)
+            vram = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+            print(f"  GPU: {gpu} ({vram:.1f} GB)")
+            n_gpu = -1  # All layers on GPU
+        else:
+            print(f"  GPU: Não disponível (CPU mode)")
+            n_gpu = 0
+    except Exception:
+        print(f"  GPU: Checking via llama.cpp...")
+        n_gpu = -1  # Let llama.cpp decide
 
-        wrappers = []
-        named_mods = dict(model.named_modules())
-        for name, mod in list(named_mods.items()):
-            if not hasattr(mod, 'act_fn') or not hasattr(mod, 'gate_proj'):
-                continue
-            if "vision" in name or "audio" in name:
-                continue
-            wrapper = TopKMaskedMLP(mod, keep_ratio=0.50)
-            parent_parts = name.rsplit(".", 1)
-            if len(parent_parts) == 2:
-                parent = named_mods.get(parent_parts[0])
-                if parent:
-                    setattr(parent, parent_parts[1], wrapper)
-                    wrappers.append(wrapper)
+    all_results = {}
 
-        logger.info(f"Top-K patched {len(wrappers)} MLPs (keep=50%)")
+    for variant_name, filename, est_size in GGUF_VARIANTS:
+        print(f"\n{'─'*60}")
+        print(f"  {variant_name} ({est_size})")
+        print(f"{'─'*60}")
 
-        for w in wrappers:
-            w.reset_stats()
-
-        quant_topk_results = benchmark_generate(model, tokenizer, prompts)
-        quant_topk_tps = sum(r["tok_per_s"] for r in quant_topk_results) / len(quant_topk_results)
-
-        # Unpatch
-        named_mods2 = dict(model.named_modules())
-        for name, mod in list(named_mods2.items()):
-            if isinstance(mod, TopKMaskedMLP):
-                parent_parts = name.rsplit(".", 1)
-                if len(parent_parts) == 2:
-                    parent = named_mods2.get(parent_parts[0])
-                    if parent:
-                        setattr(parent, parent_parts[1], mod.original_mlp)
-        logger.info(f"Unpatched {len(wrappers)} MLPs")
-
-    except Exception as e:
-        logger.error(f"Top-K patch falhou: {e}")
-        quant_topk_tps = 0
+        try:
+            model_path = download_gguf(filename)
+            results = benchmark_llama_cpp(model_path, PROMPTS, n_gpu_layers=n_gpu)
+            avg_tps = sum(r["tok_per_s"] for r in results) / len(results)
+            all_results[variant_name] = {"tps": avg_tps, "results": results}
+        except Exception as e:
+            logger.error(f"{variant_name} falhou: {e}")
+            # Try next variant
+            continue
 
     # ═══════════════════════════════════════════════════════════════
-    # SUMMARY
+    # COMPARISON TABLE
     # ═══════════════════════════════════════════════════════════════
 
     print(f"\n{'═'*60}")
-    print(f"  RESUMO — QUANTIZAÇÃO + ESPARSIDADE")
+    print(f"  COMPARATIVO: GGUF vs bf16+SPARSIDADE")
     print(f"{'═'*60}")
-    print(f"  {'Config':<30} {'tok/s':>8} {'vs bf16':>8} {'VRAM':>10}")
+    print(f"  {'Config':<30} {'tok/s':>8} {'Notas':>20}")
     print(f"  {'─'*58}")
-    print(f"  {'bf16 denso':<30} {bf16_tps:>7.1f} {'1.00×':>8} {vram_bf16:>8.1f} GB")
-    print(f"  {f'{quant_method} denso':<30} {quant_tps:>7.1f} {quant_tps/bf16_tps:>7.2f}× {vram_quant:>8.1f} GB")
-    if quant_topk_tps > 0:
-        print(f"  {f'{quant_method} + Top-K 50%':<30} {quant_topk_tps:>7.1f} {quant_topk_tps/bf16_tps:>7.2f}× {vram_quant:>8.1f} GB")
-    print(f"\n  Referências anteriores (bf16):")
-    print(f"  {'bf16 + Top-K 50%':<30} {'7.1':>8} {'0.84×':>8} {vram_bf16:>8.1f} GB")
-    print(f"  {'bf16 + 6:8 + Top-K 50%':<30} {'7.2':>8} {'0.85×':>8} {vram_bf16:>8.1f} GB")
+
+    # GGUF results
+    for name, data in all_results.items():
+        print(f"  {'GGUF ' + name:<30} {data['tps']:>7.1f} {'llama.cpp CUDA':>20}")
+
+    # Our bf16+sparsity results
+    print(f"  {'─'*58}")
+    for name, data in BF16_RESULTS.items():
+        print(f"  {name:<30} {data['tps']:>7.1f} {data['sparsity'] + ' sparse':>20}")
+
+    print(f"\n  GGUF Q4 usa ~4-5 GB VRAM vs ~14.5 GB bf16")
+    print(f"  GGUF já tem kernels otimizados para quantização")
     print(f"{'═'*60}\n")
 
     return 0
