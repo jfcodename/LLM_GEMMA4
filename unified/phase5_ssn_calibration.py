@@ -69,7 +69,8 @@ class SSNCalibrationWrapper(nn.Module):
         self.router = LowRankRouter(in_features=in_dim, out_features=out_dim, rank=128)
         self.loss_fn = nn.BCEWithLogitsLoss()
         
-        self.current_loss = torch.tensor(0.0, device=original_mlp.gate_proj.weight.device)
+        self.batch_loss = None
+        self.current_loss_log = 0.0
         self.samples = 0
 
     def forward(self, x):
@@ -97,7 +98,8 @@ class SSNCalibrationWrapper(nn.Module):
         
         # 3. Calcular Perda
         loss = self.loss_fn(flat_logits, target_mask)
-        self.current_loss += loss
+        self.batch_loss = loss
+        self.current_loss_log += loss.item()
         self.samples += 1
         
         # O forward continua normal para o resto da rede não quebrar
@@ -115,8 +117,8 @@ class SSNCalibrationWrapper(nn.Module):
     def get_avg_loss_and_reset(self):
         if self.samples == 0:
             return 0.0
-        avg = (self.current_loss / self.samples).item()
-        self.current_loss.zero_()
+        avg = self.current_loss_log / self.samples
+        self.current_loss_log = 0.0
         self.samples = 0
         return avg
 
@@ -212,7 +214,9 @@ def main():
             total_loss = torch.tensor(0.0, device=model.device)
             for w in wrappers:
                 # Move a loss local daquela camada para o device principal antes de somar
-                total_loss += w.current_loss.to(model.device)
+                if w.batch_loss is not None:
+                    total_loss += w.batch_loss.to(model.device)
+                    w.batch_loss = None # Clear after use
                 
             total_loss.backward()
             optimizer.step()
