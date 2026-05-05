@@ -39,9 +39,9 @@ def main():
     parser.add_argument("--topk", type=int, default=2, help="Quantos experts roteados ativar por token")
     args = parser.parse_args()
 
-    print(f"\n{'═'*65}")
-    print(f"  FASE 7: DEEPSLICE MOE (MAMBA-2 ROUTING)")
-    print(f"{'═'*65}")
+    print("\n" + "="*65)
+    print("  FASE 7: DEEPSLICE MOE (MAMBA-2 ROUTING)")
+    print("="*65)
 
     if args.mock:
         logger.info("Carregando MockGemma4E4B...")
@@ -80,9 +80,9 @@ def main():
         base_res = benchmark(model, tokenizer, prompts)
         print_results("Baseline", base_res, sparsity=0.0)
 
-    print(f"\n{'─'*65}")
-    print(f"  CONVERSÃO E ROTEAMENTO (DEEPSLICE)")
-    print(f"{'─'*65}")
+    print("\n" + "-"*65)
+    print("  CONVERSÃO E ROTEAMENTO (DEEPSLICE)")
+    print("-"*65)
     
     # Executa o conversor arquitetural
     converter = DeepSliceConverter(
@@ -99,9 +99,9 @@ def main():
     params_after = count_params(model)
     logger.info(f"Parâmetros Globais da Rede (MoEified): {params_after / 1e6:.2f} M")
 
-    print(f"\n{'─'*65}")
-    print(f"  BENCHMARK PÓS-MOEIFICATION")
-    print(f"{'─'*65}")
+    print("\n" + "-"*65)
+    print("  BENCHMARK PÓS-MOEIFICATION")
+    print("-"*65)
     
     # Calcular % computacional teórica economizada na FFN
     ffn_compute_ratio = args.shared_ratio + ((1.0 - args.shared_ratio) * (args.topk / args.experts))
@@ -116,10 +116,10 @@ def main():
         moe_res = benchmark(model, tokenizer, prompts)
         print_results("DeepSlice MoE", moe_res, sparsity=sparsity_theoretical)
 
-    print(f"\n{'═'*65}")
-    print(f"  CONCLUSÃO: O modelo agora roteia tokens contextualmente via Mamba-2")
-    print(f"  para pequenas frações da rede, preservando o número total de parâmetros!")
-    print(f"{'═'*65}\n")
+    print("\n" + "="*65)
+    print("  CONCLUSÃO: O modelo agora roteia tokens contextualmente via Mamba-2")
+    print("  para pequenas frações da rede, preservando o número total de parâmetros!")
+    print("="*65 + "\n")
 
 if __name__ == "__main__":
     main()

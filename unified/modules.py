@@ -278,6 +278,8 @@ class Mamba2Router(nn.Module):
         
         with torch.no_grad():
             nn.init.zeros_(self.out_proj.bias)
+            if num_experts > 0:
+                self.out_proj.bias[:num_experts_per_tok] = 5.0
                 
         self.act = nn.SiLU()
 
