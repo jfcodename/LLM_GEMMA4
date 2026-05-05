@@ -254,7 +254,7 @@ class Mamba2Router(nn.Module):
     Resolve a 'Miopia de Token' criando um contexto contínuo temporal da frase
     antes de prever os logits dos especialistas. Ultra-leve e com tempo linear.
     """
-    def __init__(self, hidden_size: int, num_experts: int, d_state: int = 16):
+    def __init__(self, hidden_size: int, num_experts: int, d_state: int = 16, num_experts_per_tok: int = 2):
         super().__init__()
         self.in_proj = nn.Linear(hidden_size, d_state, bias=False)
         
@@ -269,7 +269,21 @@ class Mamba2Router(nn.Module):
         self.A_log = nn.Parameter(torch.log(torch.rand(d_state) * 0.1 + 0.9))
         self.B = nn.Linear(d_state, d_state, bias=False)
         
-        self.out_proj = nn.Linear(d_state, num_experts, bias=False)
+        # WARM START ZERO-SHOT:
+        # Adicionamos bias para guiar o MoE antes do Fine-Tuning.
+        self.out_proj = nn.Linear(d_state, num_experts, bias=True)
+        
+        # Zera os pesos iniciais do roteador para que as previsões iniciem focadas no bias
+        nn.init.zeros_(self.out_proj.weight)
+        
+        with torch.no_grad():
+            self.out_proj.bias.fill_(0.0)
+            if num_experts > 0:
+                # O Roteador começará viciado em escolher os Experts 0 e 1 
+                # (que contêm os melhores neurônios subsequentes do L2 norm).
+                # Isso impede o colapso "Random Pruning" no modo Zero-Shot!
+                self.out_proj.bias[:num_experts_per_tok] = 10.0
+                
         self.act = nn.SiLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -334,7 +348,7 @@ class DeepSliceMoE(nn.Module):
         self.routed_experts = routed_experts
         self.num_experts_per_tok = min(num_experts_per_tok, len(routed_experts))
         
-        self.router = Mamba2Router(hidden_size, len(routed_experts))
+        self.router = Mamba2Router(hidden_size, len(routed_experts), num_experts_per_tok=self.num_experts_per_tok)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Auto-casting dinâmico para contornar bloqueios de offload da 'accelerate'
