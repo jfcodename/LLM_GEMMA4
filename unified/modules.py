@@ -280,7 +280,20 @@ class Mamba2Router(nn.Module):
         
         # 2. Mistura Convolucional (Causal)
         u_conv = u.transpose(1, 2) # (B, d_state, T)
-        u_conv = self.conv1d(u_conv)[:, :, :T] # fatiar o padding causal
+        
+        # FIX: Evitar bug do cuDNN em GPUs Turing (T4) para Depthwise Conv1d com bfloat16
+        orig_dtype = u_conv.dtype
+        w = self.conv1d.weight.to(torch.float32)
+        b = self.conv1d.bias.to(torch.float32) if self.conv1d.bias is not None else None
+        
+        u_conv = F.conv1d(
+            u_conv.to(torch.float32), 
+            w, b, 
+            padding=self.conv1d.padding, 
+            groups=self.conv1d.groups
+        ).to(orig_dtype)
+        
+        u_conv = u_conv[:, :, :T] # fatiar o padding causal
         u_conv = self.act(u_conv.transpose(1, 2)) # (B, T, d_state)
         
         # 3. Recorrência Linear SSM (Construção do Cérebro Contextual)
