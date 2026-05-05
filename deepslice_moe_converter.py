@@ -3,8 +3,8 @@ import torch.nn as nn
 import logging
 from typing import List, Dict
 
-from unified.modules import DeepSliceMoE, PrunedMLP, Mamba2Router
-from structural_pruning import NeuronImportanceCalibrator
+from unified.modules import DeepSliceMoE, Mamba2Router
+from structural_pruning import NeuronImportanceCalibrator, PrunedMLP
 
 logger = logging.getLogger(__name__)
 
