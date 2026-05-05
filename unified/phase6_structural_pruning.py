@@ -97,7 +97,7 @@ def main():
     print(f"  PODA ESTRUTURAL FÍSICA")
     print(f"{'─'*60}")
     
-    pruner = StructuralPruner(model, keep_ratio=args.keep_ratio, use_relu2=True)
+    pruner = StructuralPruner(model, keep_ratio=args.keep_ratio, use_relu2=False)
     report = pruner.prune(neuron_selection, verbose=True)
 
     params_after = count_params(model)
