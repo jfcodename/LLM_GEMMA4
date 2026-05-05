@@ -54,9 +54,19 @@ class DeepSliceConverter:
             shared_idx = sorted_indices[:n_shared]
             routed_indices = sorted_indices[n_shared:]
             
+            layer_device = layer.mlp.gate_proj.weight.device
+            
+            # TRUQUE DE MESTRE PARA OOM:
+            # Move a camada densa antiga para a CPU *ANTES* de clonar os pesos!
+            # Isso garante que nunca teremos 2x a camada na VRAM simultaneamente.
+            layer.mlp.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             def create_expert(indices):
                 # Mantém a ordem original dos canais de ativação
                 indices = indices.sort()[0] 
+                # As clonagens agora ocorrem na RAM da CPU!
                 gate_w = layer.mlp.gate_proj.weight.data[indices].clone()
                 up_w   = layer.mlp.up_proj.weight.data[indices].clone()
                 down_w = layer.mlp.down_proj.weight.data[:, indices].clone()
@@ -88,23 +98,20 @@ class DeepSliceConverter:
             routed_experts_module = nn.ModuleList(routed_experts_list)
             hidden_size = layer.mlp.gate_proj.in_features
             
-            layer_device = layer.mlp.gate_proj.weight.device
-            
-            # Limpa VRAM antes de instanciar a estrutura complexa do MoE
-            layer.mlp.to("cpu")
-            del layer.mlp
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                
-            # Instancia o Novo Core DeepSliceMoE na mesma GPU da camada original
+            # Instancia o Novo Core DeepSliceMoE (ainda na CPU)
             deepslice_moe = DeepSliceMoE(
                 hidden_size=hidden_size,
                 shared_expert=shared_expert,
                 routed_experts=routed_experts_module,
                 num_experts_per_tok=self.num_experts_per_tok
-            ).to(layer_device)
+            )
             
+            # O Python Garbage Collector deletará a velha MLP da CPU
             layer.add_module("mlp", deepslice_moe)
+            
+            # Finalmente, enviamos a NOVA matriz particionada de volta para a GPU original
+            layer.mlp.to(layer_device)
+            
             logger.info(f"Layer {layer_idx}: Convertida para DeepSliceMoE -> Shared: {n_shared} nerônios | {self.num_routed_experts} Experts de ~{n_per_expert} neurônios")
             
         return self.model
