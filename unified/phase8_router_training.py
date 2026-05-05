@@ -96,7 +96,7 @@ class RouterTrainer:
 
     def _collect_logits_hook(self, module, input, output):
         # output: router_logits (B, T, num_experts)
-        # Movemos para CPU para evitar erros em setups multi-GPU durante o torch.cat
+        # Movemos para CPU para evitar erros em setups multi-GPU
         self.collected_logits.append(output.view(-1, output.size(-1)).detach().to("cpu"))
 
     def compute_loss(self, outputs, labels):
@@ -108,23 +108,48 @@ class RouterTrainer:
         loss_fct = nn.CrossEntropyLoss()
         lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         
-        # Load Balancing Loss (Auxiliary Loss)
-        balance_loss = 0
-        if self.collected_logits:
-            # Concatena no CPU e move para o device do modelo para o calculo final
-            device = labels.device
-            all_logits = torch.cat(self.collected_logits, dim=0).to(device) 
-            probs = torch.softmax(all_logits, dim=-1)
-            mean_probs = probs.mean(dim=0)
-            balance_loss = torch.var(mean_probs) * all_logits.size(-1)
-            self.collected_logits = [] # Limpa para o proximo passo
-            
-        return lm_loss + (self.balance_loss_weight * balance_loss)
+        # Auxiliary-Loss-Free: Não usamos mais a balance_loss no gradiente!
+        # O balanceamento é feito via bias adaptativo no train_step.
+        return lm_loss
 
-    def train_step(self, batch):
+    def update_router_biases(self, gamma=0.001):
+        """
+        Ajusta o bias dos roteadores baseado no uso real (DeepSeek-V3 style).
+        """
+        if not self.collected_logits:
+            return
+            
+        # 1. Calcula o load global (média entre todas as camadas e tokens do batch)
+        all_logits = torch.cat(self.collected_logits, dim=0)
+        num_experts = all_logits.size(-1)
+        
+        # Simula a seleção top-k para calcular o load
+        # Nota: Idealmente usaríamos os índices reais do forward, mas os logits bastam
+        # pois a seleção é determinística baseada neles + bias atual.
+        # Pegamos o bias da primeira camada como referência (geralmente são similares)
+        first_router = next(m for m in self.model.modules() if isinstance(m, Mamba2Router))
+        bias = first_router.adaptive_bias.cpu()
+        
+        scores = torch.sigmoid(all_logits) + bias
+        _, top_indices = torch.topk(scores, first_router.out_proj.out_features // 128 + 2, dim=-1) # K adaptativo
+        
+        # Load: frequência de cada expert nos top-k
+        flat_indices = top_indices.view(-1)
+        counts = torch.bincount(flat_indices, minlength=num_experts).float()
+        load = counts / (all_logits.size(0) * top_indices.size(1))
+        target_load = 1.0 / num_experts
+        
+        # 2. Atualiza bias em todos os roteadores
+        for module in self.model.modules():
+            if isinstance(module, Mamba2Router):
+                module.update_bias(load.to(module.adaptive_bias.device), target_load, gamma=gamma)
+        
+        self.collected_logits = []
+
+    def train_step(self, batch, gamma=0.001):
         self.model.train()
         self.optimizer.zero_grad()
-        self.collected_logits = [] # Garante limpeza
+        self.collected_logits = []
         
         device = next(self.model.parameters()).device
         input_ids = batch['input_ids'].to(device)
@@ -136,6 +161,9 @@ class RouterTrainer:
         
         loss.backward()
         self.optimizer.step()
+        
+        # Atualiza o bias adaptativo (Auxiliary-Loss-Free Balancing)
+        self.update_router_biases(gamma=gamma)
         
         return loss.item()
 
@@ -153,6 +181,7 @@ def main():
     parser.add_argument("--steps", type=int, default=0, help="Limite de passos por epoca (0 = todos)")
     parser.add_argument("--patience", type=int, default=5, help="Epocas para esperar antes de Early Stopping")
     parser.add_argument("--target-loss", type=float, default=1.5, help="Para se atingir essa loss")
+    parser.add_argument("--gamma", type=float, default=0.005, help="Bias update speed (DeepSeek-V3)")
     parser.add_argument("--save-path", default="checkpoints/router_trained")
     args = parser.parse_args()
 
@@ -216,7 +245,7 @@ def main():
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}")
         
         for step, batch in enumerate(pbar):
-            loss = trainer.train_step(batch)
+            loss = trainer.train_step(batch, gamma=args.gamma)
             epoch_loss += loss
             pbar.set_postfix({"loss": f"{loss:.4f}", "best": f"{best_loss:.4f}"})
             

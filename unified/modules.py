@@ -269,19 +269,25 @@ class Mamba2Router(nn.Module):
         self.A_log = nn.Parameter(torch.log(torch.rand(d_state) * 0.1 + 0.9))
         self.B = nn.Linear(d_state, d_state, bias=False)
         
-        # WARM START ZERO-SHOT:
-        # Adicionamos bias para guiar o MoE antes do Fine-Tuning.
+        # DeepSeek-V3 Style: Bias adaptativo para load balancing sem perda auxiliar
         self.out_proj = nn.Linear(d_state, num_experts, bias=True)
+        self.register_buffer("adaptive_bias", torch.zeros(num_experts))
         
-        # Zera os pesos iniciais do roteador para que as previsões iniciem focadas no bias
+        # Inicialização neutra
         nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
         
-        with torch.no_grad():
-            nn.init.zeros_(self.out_proj.bias)
-            if num_experts > 0:
-                self.out_proj.bias[:num_experts_per_tok] = 5.0
-                
         self.act = nn.SiLU()
+
+    def update_bias(self, load, target_load, gamma=0.01):
+        """
+        Atualiza o bias adaptativo baseado no load real dos experts.
+        load: (num_experts) - fração de tokens processados por cada expert no batch
+        """
+        with torch.no_grad():
+            # Se load < target, aumenta o bias para atrair mais tokens
+            # Se load > target, diminui o bias para repelir tokens
+            self.adaptive_bias += gamma * (target_load - load)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, D = x.shape
@@ -360,14 +366,22 @@ class DeepSliceMoE(nn.Module):
         if len(self.routed_experts) == 0 or self.num_experts_per_tok == 0:
             return shared_out
             
-        # 2. Roteador Mamba-2 (Seleciona Top-K)
+        # 2. Roteador Mamba-2 (DeepSeek-V3 Style)
         router_logits = self.router(x)
-        routing_weights = F.softmax(router_logits, dim=-1)
+        # s_ij = Sigmoid(u_i * e_j)
+        scores = torch.sigmoid(router_logits)
         
-        top_k_weights, top_k_indices = torch.topk(
-            routing_weights, self.num_experts_per_tok, dim=-1
+        # Seleção usa o bias adaptativo (score_ij + b_j), mas o peso da soma NÃO usa
+        selection_scores = scores + self.router.adaptive_bias
+        
+        top_k_scores, top_k_indices = torch.topk(
+            selection_scores, self.num_experts_per_tok, dim=-1
         )
-        # Normaliza
+        
+        # Pesos reais para a soma (extraídos dos scores originais, sem o bias de balanceamento)
+        top_k_weights = scores.gather(-1, top_k_indices)
+        
+        # Normaliza apenas os pesos selecionados para manter escala de ativação
         top_k_weights = top_k_weights / top_k_weights.sum(dim=-1, keepdim=True)
         
         # 3. Forward Pass Esparso nos Routed Experts
