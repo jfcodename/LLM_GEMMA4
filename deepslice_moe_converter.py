@@ -107,12 +107,8 @@ class DeepSliceConverter:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # TRUQUE 2 PARA OOM (Vazamento de Hook):
-            # O `accelerate` mantém hooks vivos apontando para os tensores velhos.
-            # Esvaziamos fisicamente os tensores para garantir liberação de VRAM.
-            layer.mlp.gate_proj.weight.data = torch.empty(0, device="cpu")
-            layer.mlp.up_proj.weight.data = torch.empty(0, device="cpu")
-            layer.mlp.down_proj.weight.data = torch.empty(0, device="cpu")
+            # Vamos imitar a Fase 6 EXATAMENTE: deletar o MLP velho para não interferir nos hooks.
+            del layer.mlp
             
             # Instancia o Novo Core DeepSliceMoE (ainda na CPU)
             # Obs: nn.Linear cria tensores em float32 (dobro de memória!).
