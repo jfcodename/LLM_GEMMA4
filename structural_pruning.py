@@ -75,14 +75,19 @@ class PrunedMLP(nn.Module):
         self.intermediate_size = kept_neurons
         self.use_relu2 = use_relu2
 
-        # Pesos fisicamente menores — o único segredo do speedup
-        self.gate_proj = nn.Linear(hidden_size, kept_neurons, bias=False)
-        self.up_proj   = nn.Linear(hidden_size, kept_neurons, bias=False)
-        self.down_proj = nn.Linear(kept_neurons, hidden_size, bias=False)
+        # Pesos fisicamente menores
+        # Inicializa direto no device/dtype para evitar alocação dupla na CPU e transferência
+        device = gate_proj_weight.device
+        dtype = gate_proj_weight.dtype
+        
+        self.gate_proj = nn.Linear(hidden_size, kept_neurons, bias=False, device=device, dtype=dtype)
+        self.up_proj   = nn.Linear(hidden_size, kept_neurons, bias=False, device=device, dtype=dtype)
+        self.down_proj = nn.Linear(kept_neurons, hidden_size, bias=False, device=device, dtype=dtype)
 
-        self.gate_proj.weight.data.copy_(gate_proj_weight)
-        self.up_proj.weight.data.copy_(up_proj_weight)
-        self.down_proj.weight.data.copy_(down_proj_weight)
+        # Assinala o tensor de forma direta e in-place em vez de .copy_() (economiza VRAM temporária)
+        self.gate_proj.weight = nn.Parameter(gate_proj_weight)
+        self.up_proj.weight = nn.Parameter(up_proj_weight)
+        self.down_proj.weight = nn.Parameter(down_proj_weight)
 
         # Registra índices para auditoria/análise (não afeta compute)
         if neuron_indices is not None:
@@ -391,7 +396,14 @@ class StructuralPruner:
             dtype = layer.mlp.gate_proj.weight.dtype
             device = layer.mlp.gate_proj.weight.device
 
-            # Cria PrunedMLP com os pesos selecionados
+            # IMPORTANTE: Deleta o MLP antigo e limpa o cache ANTES de associar o novo para evitar picos de OOM
+            # Movendo para a CPU primeiro para garantir que a VRAM fique livre
+            layer.mlp.to("cpu")
+            del layer.mlp
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # Cria PrunedMLP com os pesos selecionados (já não faz double copy graças à otimização acima)
             pruned_mlp = PrunedMLP(
                 hidden_size=hidden_size,
                 kept_neurons=n_kept,
@@ -400,10 +412,10 @@ class StructuralPruner:
                 down_proj_weight=down_w,
                 use_relu2=self.use_relu2,
                 neuron_indices=kept_idx.cpu(),
-            ).to(device=device, dtype=dtype)
+            )
 
             # Substitui in-place
-            layer.mlp = pruned_mlp
+            layer.add_module("mlp", pruned_mlp)
             n_pruned += 1
 
             report = {
