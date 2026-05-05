@@ -281,15 +281,19 @@ class Mamba2Router(nn.Module):
         # 2. Mistura Convolucional (Causal)
         u_conv = u.transpose(1, 2) # (B, d_state, T)
         
+        # FIX: causal padding manual correto
+        u_conv = F.pad(u_conv, (2, 0)) # pad left
+        
         # FIX: Evitar bug do cuDNN em GPUs Turing (T4) para Depthwise Conv1d com bfloat16
         orig_dtype = u_conv.dtype
         w = self.conv1d.weight.to(torch.float32)
         b = self.conv1d.bias.to(torch.float32) if self.conv1d.bias is not None else None
         
+        # Como já fizemos o pad manual acima, o padding interno tem que ser 0
         u_conv = F.conv1d(
             u_conv.to(torch.float32), 
             w, b, 
-            padding=self.conv1d.padding, 
+            padding=0, 
             groups=self.conv1d.groups
         ).to(orig_dtype)
         
@@ -363,15 +367,20 @@ class DeepSliceMoE(nn.Module):
         
         for i, expert in enumerate(self.routed_experts):
             mask = (indices_flat == i)
-            if not mask.any():
+            token_idx, weight_idx = torch.where(mask)
+            if len(token_idx) == 0:
                 continue
                 
-            token_idx, weight_idx = torch.where(mask)
             expert_tokens = x_flat[token_idx]
             expert_weights = weights_flat[token_idx, weight_idx].unsqueeze(-1)
             
             expert_out = expert(expert_tokens)
-            out_flat.index_add_(0, token_idx, expert_out * expert_weights)
+            
+            # FIX: Restaurar a magnitude algébrica do FFN
+            # Como a softmax artificialmente "espreme" os pesos para somar 1, os experts 
+            # roteados perderiam sua magnitude original (que na rede densa é uma SOMA e não média).
+            # Multiplicamos pelo self.num_experts_per_tok para balancear a escala (DeepSeek math).
+            out_flat[token_idx] += expert_out * expert_weights * self.num_experts_per_tok
             
         routed_out = out_flat.view(B, T, D)
         
