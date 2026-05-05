@@ -96,7 +96,8 @@ class RouterTrainer:
 
     def _collect_logits_hook(self, module, input, output):
         # output: router_logits (B, T, num_experts)
-        self.collected_logits.append(output.view(-1, output.size(-1)))
+        # Movemos para CPU para evitar erros em setups multi-GPU durante o torch.cat
+        self.collected_logits.append(output.view(-1, output.size(-1)).detach().to("cpu"))
 
     def compute_loss(self, outputs, labels):
         # LM Loss (Cross Entropy)
@@ -110,7 +111,9 @@ class RouterTrainer:
         # Load Balancing Loss (Auxiliary Loss)
         balance_loss = 0
         if self.collected_logits:
-            all_logits = torch.cat(self.collected_logits, dim=0) # (TotalTokens * Layers, num_experts)
+            # Concatena no CPU e move para o device do modelo para o calculo final
+            device = labels.device
+            all_logits = torch.cat(self.collected_logits, dim=0).to(device) 
             probs = torch.softmax(all_logits, dim=-1)
             mean_probs = probs.mean(dim=0)
             balance_loss = torch.var(mean_probs) * all_logits.size(-1)
