@@ -360,19 +360,6 @@ class DeepSliceMoE(nn.Module):
         # 1. Especialista Compartilhado (Sempre roda, Inteligência Core)
         shared_out = self.shared_expert(x)
         
-        # BYPASS DIAGNÓSTICO:
-        # Ignora totalmente o roteador e a lógica esparsa.
-        # Apenas soma os Experts 0 e 1 de forma densa.
-        # Se isso gerar texto perfeito, o bug está no loop do MoE.
-        # Se isso gerar garbage, o bug está na extração de pesos (PrunedMLP).
-        bypass_out = shared_out.clone()
-        if len(self.routed_experts) > 1:
-            bypass_out += self.routed_experts[0](x)
-            bypass_out += self.routed_experts[1](x)
-            
-        return bypass_out
-        
-        # --- CÓDIGO MORTO ABAIXO (DEBUG) ---
         if len(self.routed_experts) == 0:
             return shared_out
             

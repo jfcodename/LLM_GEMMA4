@@ -34,9 +34,9 @@ def count_params(model):
 def main():
     parser = argparse.ArgumentParser(description="Phase 7: DeepSlice MoE")
     parser.add_argument("--mock", action="store_true", help="Usa mock model (CPU)")
-    parser.add_argument("--shared-ratio", type=float, default=0.35, help="Fração de neurônios no Shared Expert")
+    parser.add_argument("--shared-ratio", type=float, default=0.50, help="Fração de neurônios no Shared Expert")
     parser.add_argument("--experts", type=int, default=8, help="Número de Routed Experts")
-    parser.add_argument("--topk", type=int, default=2, help="Quantos experts roteados ativar por token")
+    parser.add_argument("--topk", type=int, default=0, help="Quantos experts roteados ativar por token")
     args = parser.parse_args()
 
     print(f"\n{'═'*65}")
