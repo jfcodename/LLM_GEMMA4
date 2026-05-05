@@ -116,14 +116,12 @@ class DeepSliceConverter:
                 num_experts_per_tok=self.num_experts_per_tok
             )
             
-            # Converte para bfloat16/float16 na CPU ANTES de mandar pra GPU
-            deepslice_moe.to(dtype=layer_dtype)
+            # Converte para bfloat16/float16 E move para a GPU *ANTES* de atachar ao modelo!
+            # Isso impede que o 'accelerate' do HuggingFace intercepte o .to() e mantenha na CPU.
+            deepslice_moe.to(dtype=layer_dtype, device=layer_device)
             
             # O Python Garbage Collector deletará a velha MLP da CPU
             layer.add_module("mlp", deepslice_moe)
-            
-            # Finalmente, enviamos a NOVA matriz particionada de volta para a GPU original
-            layer.mlp.to(layer_device)
             
             logger.info(f"Layer {layer_idx}: Convertida para DeepSliceMoE -> Shared: {n_shared} nerônios | {self.num_routed_experts} Experts de ~{n_per_expert} neurônios")
             
