@@ -31,6 +31,10 @@ class DeepSliceConverter:
         
     def convert(self):
         calibrator = NeuronImportanceCalibrator(self.model, device=self.device)
+        
+        # 1. Calibração Global (Proxy de Importância)
+        # Importante: Fazemos isso ANTES de começar a substituir camadas para que o calibrador
+        # veja o modelo denso original em todas as camadas.
         logger.info("Calibrando neurônios via Proxy (Gate Norm) para alocação MoE...")
         importance_scores = calibrator.calibrate_with_gate(keep_ratio=1.0)
         
@@ -51,8 +55,8 @@ class DeepSliceConverter:
             n_routed_total = n_total - n_shared
             n_per_expert = n_routed_total // self.num_routed_experts
             
-            shared_idx = torch.arange(n_total, device="cpu")
-            routed_indices = torch.arange(0, device="cpu")
+            shared_idx = sorted_indices[:n_shared]
+            routed_indices = sorted_indices[n_shared:]
             
             layer_device = layer.mlp.gate_proj.weight.device
             layer_dtype = layer.mlp.gate_proj.weight.dtype
@@ -64,7 +68,7 @@ class DeepSliceConverter:
             def create_expert(indices):
                 # Mantém a ordem original dos canais de ativação
                 indices = indices.sort()[0] 
-                # As clonagens agora ocorrem na RAM da CPU!
+                # As clonagens ocorrem na GPU para precisão total
                 gate_w = layer.mlp.gate_proj.weight.data[indices].clone()
                 up_w   = layer.mlp.up_proj.weight.data[indices].clone()
                 down_w = layer.mlp.down_proj.weight.data[:, indices].clone()
@@ -106,12 +110,18 @@ class DeepSliceConverter:
             # Vamos imitar a Fase 6 EXATAMENTE: deletar o MLP velho para não interferir nos hooks.
             del layer.mlp
             
-            # TESTE NUCLEAR: Substitui direto pela PrunedMLP (igualzinho Fase 6)
-            # Ignoramos o wrapper DeepSliceMoE por enquanto.
-            layer.add_module("mlp", shared_expert)
-            # Movemos para o device original com o dtype original
-            layer.mlp.to(device=layer_device, dtype=layer_dtype)
+            # Instancia o Novo Core DeepSliceMoE (com Shared + Experts)
+            deepslice_moe = DeepSliceMoE(
+                hidden_size=hidden_size,
+                shared_expert=shared_expert,
+                routed_experts=routed_experts_module,
+                num_experts_per_tok=self.num_experts_per_tok
+            )
             
-            logger.info(f"Layer {layer_idx}: Convertida para DeepSliceMoE -> Shared: {n_shared} nerônios | {self.num_routed_experts} Experts de ~{n_per_expert} neurônios")
+            # Converte para bfloat16/float16 E move para a GPU
+            deepslice_moe.to(dtype=layer_dtype, device=layer_device)
+            layer.add_module("mlp", deepslice_moe)
+            
+            logger.info(f"Layer {layer_idx}: DeepSliceMoE -> Shared: {n_shared} | {self.num_routed_experts} Experts")
             
         return self.model
