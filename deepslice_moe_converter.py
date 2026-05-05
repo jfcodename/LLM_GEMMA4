@@ -98,13 +98,26 @@ class DeepSliceConverter:
             routed_experts_module = nn.ModuleList(routed_experts_list)
             hidden_size = layer.mlp.gate_proj.in_features
             
+            layer_device = layer.mlp.gate_proj.weight.device
+            layer_dtype = layer.mlp.gate_proj.weight.dtype
+            
+            # TRUQUE DE MESTRE PARA OOM:
+            # Move a camada densa antiga para a CPU *ANTES* de clonar os pesos!
+            layer.mlp.to("cpu")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Instancia o Novo Core DeepSliceMoE (ainda na CPU)
+            # Obs: nn.Linear cria tensores em float32 (dobro de memória!).
             deepslice_moe = DeepSliceMoE(
                 hidden_size=hidden_size,
                 shared_expert=shared_expert,
                 routed_experts=routed_experts_module,
                 num_experts_per_tok=self.num_experts_per_tok
             )
+            
+            # Converte para bfloat16/float16 na CPU ANTES de mandar pra GPU
+            deepslice_moe.to(dtype=layer_dtype)
             
             # O Python Garbage Collector deletará a velha MLP da CPU
             layer.add_module("mlp", deepslice_moe)
