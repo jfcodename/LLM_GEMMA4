@@ -51,8 +51,8 @@ class DeepSliceConverter:
             n_routed_total = n_total - n_shared
             n_per_expert = n_routed_total // self.num_routed_experts
             
-            shared_idx = sorted_indices[:n_shared]
-            routed_indices = sorted_indices[n_shared:]
+            shared_idx = torch.arange(n_total, device="cpu")
+            routed_indices = torch.arange(0, device="cpu")
             
             layer_device = layer.mlp.gate_proj.weight.device
             layer_dtype = layer.mlp.gate_proj.weight.dtype
