@@ -106,21 +106,11 @@ class DeepSliceConverter:
             # Vamos imitar a Fase 6 EXATAMENTE: deletar o MLP velho para não interferir nos hooks.
             del layer.mlp
             
-            # Instancia o Novo Core DeepSliceMoE (ainda na CPU)
-            # Obs: nn.Linear cria tensores em float32 (dobro de memória!).
-            deepslice_moe = DeepSliceMoE(
-                hidden_size=hidden_size,
-                shared_expert=shared_expert,
-                routed_experts=routed_experts_module,
-                num_experts_per_tok=self.num_experts_per_tok
-            )
-            
-            # Converte para bfloat16/float16 E move para a GPU *ANTES* de atachar ao modelo!
-            # Isso impede que o 'accelerate' do HuggingFace intercepte o .to() e mantenha na CPU.
-            deepslice_moe.to(dtype=layer_dtype, device=layer_device)
-            
-            # O Python Garbage Collector deletará a velha MLP da CPU
-            layer.add_module("mlp", deepslice_moe)
+            # TESTE NUCLEAR: Substitui direto pela PrunedMLP (igualzinho Fase 6)
+            # Ignoramos o wrapper DeepSliceMoE por enquanto.
+            layer.add_module("mlp", shared_expert)
+            # Movemos para o device original com o dtype original
+            layer.mlp.to(device=layer_device, dtype=layer_dtype)
             
             logger.info(f"Layer {layer_idx}: Convertida para DeepSliceMoE -> Shared: {n_shared} nerônios | {self.num_routed_experts} Experts de ~{n_per_expert} neurônios")
             
