@@ -34,13 +34,9 @@ class DeepSliceConverter:
         logger.info("Calibrando neurônios via Proxy (Gate Norm) para alocação MoE...")
         importance_scores = calibrator.calibrate_with_gate(keep_ratio=1.0)
         
-        # Encontra todas as camadas de atenção do Gemma/Mock
-        layers = []
-        for name, module in self.model.named_modules():
-            # Gemma 4 structure (DecoderLayer) has an 'mlp' attribute
-            if hasattr(module, 'mlp') and hasattr(module.mlp, 'gate_proj'):
-                layers.append(module)
-                
+        # Obtém as camadas de decodificação de forma segura usando o mesmo método do calibrator
+        layers = calibrator._get_lm_layers()
+        
         for layer_idx, layer in enumerate(layers):
             if layer_idx not in importance_scores:
                 continue
