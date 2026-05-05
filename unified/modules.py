@@ -233,6 +233,10 @@ class PrunedMLP(nn.Module):
 
         if neuron_indices is not None:
             self.register_buffer("kept_neuron_indices", neuron_indices, persistent=True)
+            
+        # Fator de compensação: se usamos 50% dos neurônios, cada um deve "gritar" 2x mais forte
+        # para manter a magnitude total do sinal no residual stream.
+        self.scale = 10240 / kept_neurons if kept_neurons > 0 else 1.0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate = self.gate_proj(x)
@@ -241,7 +245,8 @@ class PrunedMLP(nn.Module):
         else:
             gate = F.gelu(gate, approximate='tanh')
         up = self.up_proj(x)
-        return self.down_proj(gate * up)
+        out = self.down_proj(gate * up)
+        return out * self.scale
 
 
 # ─────────────────────────────────────────────────────────────────────────────
