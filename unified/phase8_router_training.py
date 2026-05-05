@@ -87,28 +87,41 @@ class RouterTrainer:
         logger.info(f"Parametros congelados: {num_frozen} | Parametros treinaveis (Router): {num_trainable}")
         
         self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate, weight_decay=weight_decay)
+        
+        # Hooks para coletar logits dos roteadores para Balance Loss
+        self.collected_logits = []
+        for module in model.modules():
+            if isinstance(module, Mamba2Router):
+                module.register_forward_hook(self._collect_logits_hook)
+
+    def _collect_logits_hook(self, module, input, output):
+        # output: router_logits (B, T, num_experts)
+        self.collected_logits.append(output.view(-1, output.size(-1)))
 
     def compute_loss(self, outputs, labels):
         # LM Loss (Cross Entropy)
         logits = outputs.logits if hasattr(outputs, 'logits') else outputs
-        # Shift para causal LM
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         
         loss_fct = nn.CrossEntropyLoss()
         lm_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         
-        # Load Balancing Loss (Simples: Entropia das escolhas do roteador)
-        # Nota: Idealmente pegamos as estatísticas de uso reais dos especialistas 
-        # coletadas via hooks durante o forward.
+        # Load Balancing Loss (Auxiliary Loss)
         balance_loss = 0
-        # self.balance_loss_weight * balance_loss
-        
-        return lm_loss
+        if self.collected_logits:
+            all_logits = torch.cat(self.collected_logits, dim=0) # (TotalTokens * Layers, num_experts)
+            probs = torch.softmax(all_logits, dim=-1)
+            mean_probs = probs.mean(dim=0)
+            balance_loss = torch.var(mean_probs) * all_logits.size(-1)
+            self.collected_logits = [] # Limpa para o proximo passo
+            
+        return lm_loss + (self.balance_loss_weight * balance_loss)
 
     def train_step(self, batch):
         self.model.train()
         self.optimizer.zero_grad()
+        self.collected_logits = [] # Garante limpeza
         
         device = next(self.model.parameters()).device
         input_ids = batch['input_ids'].to(device)
@@ -132,9 +145,11 @@ def main():
     parser.add_argument("--model-id", default="google/gemma-4-e4b-it")
     parser.add_argument("--mock", action="store_true", help="Usa mock model para testes")
     parser.add_argument("--lr", type=float, default=2e-4)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--steps", type=int, default=0, help="Limite de passos por epoca (0 = todos)")
+    parser.add_argument("--patience", type=int, default=5, help="Epocas para esperar antes de Early Stopping")
+    parser.add_argument("--target-loss", type=float, default=1.5, help="Para se atingir essa loss")
     parser.add_argument("--save-path", default="checkpoints/router_trained")
     args = parser.parse_args()
 
@@ -186,9 +201,12 @@ def main():
         model.gradient_checkpointing_enable()
         model.config.use_cache = False # Necessario para gradient checkpointing
         
-    # 6. Loop de Treino
-    logger.info(f"Iniciando Fine-Tuning do Roteador ({args.epochs} epocas)...")
+    # 5. Loop de Treino com Early Stopping e Convergência Inteligente
+    logger.info(f"Iniciando Fine-Tuning do Roteador (Ate {args.epochs} epocas)...")
     model.train()
+    
+    best_loss = float('inf')
+    patience_counter = 0
     
     for epoch in range(args.epochs):
         epoch_loss = 0
@@ -197,7 +215,7 @@ def main():
         for step, batch in enumerate(pbar):
             loss = trainer.train_step(batch)
             epoch_loss += loss
-            pbar.set_postfix({"loss": f"{loss:.4f}"})
+            pbar.set_postfix({"loss": f"{loss:.4f}", "best": f"{best_loss:.4f}"})
             
             if args.steps > 0 and step >= args.steps - 1:
                 break
@@ -205,11 +223,31 @@ def main():
         avg_loss = epoch_loss / (step + 1)
         logger.info(f"Epoch {epoch+1} concluida. Loss media: {avg_loss:.4f}")
 
-    # 6. Salvar Pesos do Roteador
-    os.makedirs(args.save_path, exist_ok=True)
+        # Lógica de Convergência Inteligente
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            patience_counter = 0
+            # Salva o "Melhor Modelo"
+            os.makedirs(args.save_path, exist_ok=True)
+            router_state = {name: param for name, param in model.named_parameters() if "router" in name}
+            torch.save(router_state, os.path.join(args.save_path, "router_best.pt"))
+            logger.info(f"--- Melhor modelo salvo (loss: {best_loss:.4f}) ---")
+        else:
+            patience_counter += 1
+            logger.info(f"Sem melhora por {patience_counter} epocas.")
+
+        if avg_loss <= args.target_loss:
+            logger.info(f"--- ALVO ATINGIDO: Loss {avg_loss:.4f} <= {args.target_loss} ---")
+            break
+
+        if patience_counter >= args.patience:
+            logger.info(f"--- EARLY STOPPING: O modelo parou de aprender (convergência atingida) ---")
+            break
+
+    # 6. Salvar Pesos Finais
     router_state = {name: param for name, param in model.named_parameters() if "router" in name}
-    torch.save(router_state, os.path.join(args.save_path, "router_weights.pt"))
-    logger.info(f"Pesos do roteador salvos em: {args.save_path}")
+    torch.save(router_state, os.path.join(args.save_path, "router_final.pt"))
+    logger.info(f"Pesos finais salvos em: {args.save_path}")
 
 if __name__ == "__main__":
     main()
