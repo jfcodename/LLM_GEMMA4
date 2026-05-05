@@ -360,7 +360,7 @@ class DeepSliceMoE(nn.Module):
         # 1. Especialista Compartilhado (Sempre roda, Inteligência Core)
         shared_out = self.shared_expert(x)
         
-        if len(self.routed_experts) == 0:
+        if len(self.routed_experts) == 0 or self.num_experts_per_tok == 0:
             return shared_out
             
         # 2. Roteador Mamba-2 (Seleciona Top-K)
