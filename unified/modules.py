@@ -383,14 +383,12 @@ class DeepSliceMoE(nn.Module):
                 continue
                 
             expert_tokens = x_flat[token_idx]
-            expert_weights = weights_flat[token_idx, weight_idx].unsqueeze(-1)
-            
             expert_out = expert(expert_tokens)
             
-            # FIX: Experts roteados são somados, não ponderados.
-            # Como cada expert cobre uma fatia distinta do espaço neuronal, 
-            # a contribuição correta é a soma direta, sem normalização por weights ou top-k.
-            out_flat[token_idx] += expert_out
+            # Multiplicamos pelo peso do roteador correspondente (Diferenciabilidade)
+            # weights_flat tem shape (B*T, K)
+            current_weights = weights_flat[token_idx, weight_idx].unsqueeze(-1)
+            out_flat[token_idx] += expert_out * current_weights
             
         routed_out = out_flat.view(B, T, D)
         
