@@ -47,6 +47,21 @@ class MockRMSNorm(nn.Module):
         return x * self.weight
 
 
+class MockTextMLP(nn.Module):
+    """Simula Gemma4TextMLP para compatibilidade com scripts de pruning."""
+    def __init__(self, hidden_size: int, intermediate_size: int):
+        super().__init__()
+        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+        self.act_fn = nn.GELU(approximate='tanh')
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gate_out = self.act_fn(self.gate_proj(x))
+        up_out = self.up_proj(x)
+        return self.down_proj(gate_out * up_out)
+
+
 class MockTextDecoderLayer(nn.Module):
     """
     Simula Gemma4TextDecoderLayer do E4B.
@@ -83,20 +98,13 @@ class MockTextDecoderLayer(nn.Module):
 
         # ── MLP (FFN) ─────────────────────────────────────────────────────
         intermediate = config.intermediate_size
-        self.mlp = nn.ModuleDict({
-            "gate_proj": nn.Linear(hidden, intermediate, bias=False),
-            "up_proj":   nn.Linear(hidden, intermediate, bias=False),
-            "down_proj": nn.Linear(intermediate, hidden, bias=False),
-        })
+        self.mlp = MockTextMLP(hidden, intermediate)
 
         # ── Norms ─────────────────────────────────────────────────────────
         self.input_layernorm = MockRMSNorm(hidden)
         self.post_attention_layernorm = MockRMSNorm(hidden)
         self.pre_feedforward_layernorm = MockRMSNorm(hidden)
         self.post_feedforward_layernorm = MockRMSNorm(hidden)
-
-        # ── Activation ────────────────────────────────────────────────────
-        self.act_fn = nn.GELU(approximate='tanh')
 
         # ── Per-layer gate (AltUp/LAuReL) — presente em TODAS as layers ──
         self.per_layer_input_gate = nn.Linear(hidden, config.gate_bottleneck_size, bias=False)
@@ -127,10 +135,7 @@ class MockTextDecoderLayer(nn.Module):
         # MLP
         residual = x
         x = self.pre_feedforward_layernorm(x)
-        gate_out = self.act_fn(self.mlp["gate_proj"](x))
-        up_out = self.mlp["up_proj"](x)
-        hidden = gate_out * up_out
-        mlp_out = self.mlp["down_proj"](hidden)
+        mlp_out = self.mlp(x)
         x = residual + mlp_out
         x = self.post_feedforward_layernorm(x)
 

@@ -190,6 +190,62 @@ class ReLU2GatedMLP(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 2.5 PRUNED MLP (PODA ESTRUTURAL FÍSICA)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PrunedMLP(nn.Module):
+    """
+    MLP com dimensão intermediate fisicamente reduzida (Pruning Estrutural).
+
+    Pesos são SUBCONJUNTOS dos pesos originais:
+      gate_proj.weight: (keep_neurons, hidden_size)    ← linhas selecionadas
+      up_proj.weight:   (keep_neurons, hidden_size)    ← linhas selecionadas
+      down_proj.weight: (hidden_size, keep_neurons)    ← colunas selecionadas
+
+    Resultado: forward pass faz matmuls menores → speedup real em hardware.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        kept_neurons: int,
+        gate_proj_weight: Optional[torch.Tensor] = None,
+        up_proj_weight: Optional[torch.Tensor] = None,
+        down_proj_weight: Optional[torch.Tensor] = None,
+        use_relu2: bool = True,
+        neuron_indices: Optional[torch.Tensor] = None,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.intermediate_size = kept_neurons
+        self.use_relu2 = use_relu2
+
+        self.gate_proj = nn.Linear(hidden_size, kept_neurons, bias=False)
+        self.up_proj   = nn.Linear(hidden_size, kept_neurons, bias=False)
+        self.down_proj = nn.Linear(kept_neurons, hidden_size, bias=False)
+
+        if gate_proj_weight is not None:
+            self.gate_proj.weight.data.copy_(gate_proj_weight)
+        if up_proj_weight is not None:
+            self.up_proj.weight.data.copy_(up_proj_weight)
+        if down_proj_weight is not None:
+            self.down_proj.weight.data.copy_(down_proj_weight)
+
+        if neuron_indices is not None:
+            self.register_buffer("kept_neuron_indices", neuron_indices, persistent=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gate = self.gate_proj(x)
+        if self.use_relu2:
+            gate = F.relu(gate).square()
+        else:
+            gate = F.gelu(gate, approximate='tanh')
+        up = self.up_proj(x)
+        return self.down_proj(gate * up)
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 3. SNAP KV CACHE
 # ─────────────────────────────────────────────────────────────────────────────
 
