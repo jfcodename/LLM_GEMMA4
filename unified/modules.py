@@ -233,10 +233,6 @@ class PrunedMLP(nn.Module):
 
         if neuron_indices is not None:
             self.register_buffer("kept_neuron_indices", neuron_indices, persistent=True)
-            
-        # Fator de compensação: se usamos 50% dos neurônios, cada um deve "gritar" 2x mais forte
-        # para manter a magnitude total do sinal no residual stream.
-        self.scale = 10240 / kept_neurons if kept_neurons > 0 else 1.0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate = self.gate_proj(x)
@@ -245,8 +241,7 @@ class PrunedMLP(nn.Module):
         else:
             gate = F.gelu(gate, approximate='tanh')
         up = self.up_proj(x)
-        out = self.down_proj(gate * up)
-        return out * self.scale
+        return self.down_proj(gate * up)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,12 +277,7 @@ class Mamba2Router(nn.Module):
         nn.init.zeros_(self.out_proj.weight)
         
         with torch.no_grad():
-            self.out_proj.bias.fill_(0.0)
-            if num_experts > 0:
-                # O Roteador começará viciado em escolher os Experts 0 e 1 
-                # (que contêm os melhores neurônios subsequentes do L2 norm).
-                # Isso impede o colapso "Random Pruning" no modo Zero-Shot!
-                self.out_proj.bias[:num_experts_per_tok] = 10.0
+            nn.init.zeros_(self.out_proj.bias)
                 
         self.act = nn.SiLU()
 
@@ -395,11 +385,10 @@ class DeepSliceMoE(nn.Module):
             
             expert_out = expert(expert_tokens)
             
-            # FIX: Restaurar a magnitude algébrica do FFN
-            # Como a softmax artificialmente "espreme" os pesos para somar 1, os experts 
-            # roteados perderiam sua magnitude original (que na rede densa é uma SOMA e não média).
-            # Multiplicamos pelo self.num_experts_per_tok para balancear a escala (DeepSeek math).
-            out_flat[token_idx] += expert_out * expert_weights * self.num_experts_per_tok
+            # FIX: Experts roteados são somados, não ponderados.
+            # Como cada expert cobre uma fatia distinta do espaço neuronal, 
+            # a contribuição correta é a soma direta, sem normalização por weights ou top-k.
+            out_flat[token_idx] += expert_out
             
         routed_out = out_flat.view(B, T, D)
         
