@@ -320,6 +320,10 @@ class DeepSliceMoE(nn.Module):
         self.router = Mamba2Router(hidden_size, len(routed_experts))
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Auto-casting dinâmico para contornar bloqueios de offload da 'accelerate'
+        if self.shared_expert.gate_proj.weight.device != x.device:
+            self.to(x.device)
+            
         B, T, D = x.shape
         
         # 1. Especialista Compartilhado (Sempre roda, Inteligência Core)
