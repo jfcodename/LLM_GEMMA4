@@ -133,7 +133,7 @@ def main():
     parser.add_argument("--mock", action="store_true", help="Usa mock model para testes")
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--epochs", type=int, default=3)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--steps", type=int, default=0, help="Limite de passos por epoca (0 = todos)")
     parser.add_argument("--save-path", default="checkpoints/router_trained")
     args = parser.parse_args()
@@ -180,7 +180,13 @@ def main():
     # 4. Inicializar Treinador
     trainer = RouterTrainer(model, learning_rate=args.lr)
 
-    # 5. Loop de Treino
+    # 5. Configurações de Memória para evitar OOM
+    if not args.mock:
+        logger.info("Ativando Gradient Checkpointing para economizar VRAM...")
+        model.gradient_checkpointing_enable()
+        model.config.use_cache = False # Necessario para gradient checkpointing
+        
+    # 6. Loop de Treino
     logger.info(f"Iniciando Fine-Tuning do Roteador ({args.epochs} epocas)...")
     model.train()
     
