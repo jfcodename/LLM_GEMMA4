@@ -244,7 +244,122 @@ class PrunedMLP(nn.Module):
         return self.down_proj(gate * up)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2.6 DEEPSLICE MOE (DEEPSEEK + SLICEGPT + MAMBA-2 ROUTING)
+# ─────────────────────────────────────────────────────────────────────────────
 
+class Mamba2Router(nn.Module):
+    """
+    Roteador SSM (State Space Model) minimalista inspirado no Mamba-2.
+    Resolve a 'Miopia de Token' criando um contexto contínuo temporal da frase
+    antes de prever os logits dos especialistas. Ultra-leve e com tempo linear.
+    """
+    def __init__(self, hidden_size: int, num_experts: int, d_state: int = 16):
+        super().__init__()
+        self.in_proj = nn.Linear(hidden_size, d_state, bias=False)
+        
+        # 1D Depthwise Conv (mistura contexto localmente)
+        self.conv1d = nn.Conv1d(
+            in_channels=d_state, out_channels=d_state, 
+            kernel_size=3, padding=2, groups=d_state
+        )
+        
+        # Parâmetros da Recorrência SSM (Decaimento e Entrada)
+        # Log-space para garantir que A fique entre [0, 1] pós-exp
+        self.A_log = nn.Parameter(torch.log(torch.rand(d_state) * 0.1 + 0.9))
+        self.B = nn.Linear(d_state, d_state, bias=False)
+        
+        self.out_proj = nn.Linear(d_state, num_experts, bias=False)
+        self.act = nn.SiLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, D = x.shape
+        
+        # 1. Compressão para espaço de estado
+        u = self.in_proj(x) # (B, T, d_state)
+        
+        # 2. Mistura Convolucional (Causal)
+        u_conv = u.transpose(1, 2) # (B, d_state, T)
+        u_conv = self.conv1d(u_conv)[:, :, :T] # fatiar o padding causal
+        u_conv = self.act(u_conv.transpose(1, 2)) # (B, T, d_state)
+        
+        # 3. Recorrência Linear SSM (Construção do Cérebro Contextual)
+        A = torch.exp(self.A_log) # (d_state,)
+        B_u = self.B(u_conv)      # (B, T, d_state)
+        
+        state = torch.zeros(B, A.size(0), device=x.device, dtype=x.dtype)
+        out_states = []
+        for t in range(T):
+            state = state * A + B_u[:, t, :]
+            out_states.append(state)
+            
+        ssm_out = torch.stack(out_states, dim=1) # (B, T, d_state)
+        
+        # 4. Logits de Roteamento baseados no contexto
+        return self.out_proj(ssm_out)
+
+
+class DeepSliceMoE(nn.Module):
+    """
+    Arquitetura Fina MoE inspirada no DeepSeek V2/V3 com Shared Experts.
+    Substitui a MLP original com perda zero de parâmetros.
+    """
+    def __init__(
+        self,
+        hidden_size: int,
+        shared_expert: nn.Module,
+        routed_experts: nn.ModuleList,
+        num_experts_per_tok: int = 2,
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.shared_expert = shared_expert
+        self.routed_experts = routed_experts
+        self.num_experts_per_tok = min(num_experts_per_tok, len(routed_experts))
+        
+        self.router = Mamba2Router(hidden_size, len(routed_experts))
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, D = x.shape
+        
+        # 1. Especialista Compartilhado (Sempre roda, Inteligência Core)
+        shared_out = self.shared_expert(x)
+        
+        if len(self.routed_experts) == 0:
+            return shared_out
+            
+        # 2. Roteador Mamba-2 (Seleciona Top-K)
+        router_logits = self.router(x)
+        routing_weights = F.softmax(router_logits, dim=-1)
+        
+        top_k_weights, top_k_indices = torch.topk(
+            routing_weights, self.num_experts_per_tok, dim=-1
+        )
+        # Normaliza
+        top_k_weights = top_k_weights / top_k_weights.sum(dim=-1, keepdim=True)
+        
+        # 3. Forward Pass Esparso nos Routed Experts
+        x_flat = x.view(-1, D)
+        indices_flat = top_k_indices.view(-1, self.num_experts_per_tok)
+        weights_flat = top_k_weights.view(-1, self.num_experts_per_tok)
+        out_flat = torch.zeros_like(x_flat)
+        
+        for i, expert in enumerate(self.routed_experts):
+            mask = (indices_flat == i)
+            if not mask.any():
+                continue
+                
+            token_idx, weight_idx = torch.where(mask)
+            expert_tokens = x_flat[token_idx]
+            expert_weights = weights_flat[token_idx, weight_idx].unsqueeze(-1)
+            
+            expert_out = expert(expert_tokens)
+            out_flat.index_add_(0, token_idx, expert_out * expert_weights)
+            
+        routed_out = out_flat.view(B, T, D)
+        
+        # 4. Soma Final (Core + Especialistas Raros)
+        return shared_out + routed_out
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. SNAP KV CACHE
 # ─────────────────────────────────────────────────────────────────────────────
