@@ -55,13 +55,11 @@ class DeepSliceConverter:
             routed_indices = sorted_indices[n_shared:]
             
             layer_device = layer.mlp.gate_proj.weight.device
+            layer_dtype = layer.mlp.gate_proj.weight.dtype
             
-            # TRUQUE DE MESTRE PARA OOM:
-            # Move a camada densa antiga para a CPU *ANTES* de clonar os pesos!
-            # Isso garante que nunca teremos 2x a camada na VRAM simultaneamente.
-            layer.mlp.to("cpu")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # ATENÇÃO CRÍTICA: PyTorch tem um bug conhecido ao fazer advanced indexing (fatiamento
+            # com lista de índices) em tensores bfloat16 na CPU! Isso corrompe os bits silenciosamente!
+            # Para extrair os pesos perfeitos, DEVEMOS clonar e fatiar ANTES de enviar para a CPU!
             
             def create_expert(indices):
                 # Mantém a ordem original dos canais de ativação
@@ -98,15 +96,13 @@ class DeepSliceConverter:
             routed_experts_module = nn.ModuleList(routed_experts_list)
             hidden_size = layer.mlp.gate_proj.in_features
             
-            layer_device = layer.mlp.gate_proj.weight.device
-            layer_dtype = layer.mlp.gate_proj.weight.dtype
-            
             # TRUQUE DE MESTRE PARA OOM:
-            # Move a camada densa antiga para a CPU *ANTES* de clonar os pesos!
+            # AGORA que extraímos os especialistas com precisão nativa na GPU,
+            # movemos a camada velha para a CPU e a destruímos.
             layer.mlp.to("cpu")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
+                
             # Vamos imitar a Fase 6 EXATAMENTE: deletar o MLP velho para não interferir nos hooks.
             del layer.mlp
             
