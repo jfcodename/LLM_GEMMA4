@@ -88,19 +88,21 @@ class DeepSliceConverter:
             routed_experts_module = nn.ModuleList(routed_experts_list)
             hidden_size = layer.mlp.gate_proj.in_features
             
+            layer_device = layer.mlp.gate_proj.weight.device
+            
             # Limpa VRAM antes de instanciar a estrutura complexa do MoE
             layer.mlp.to("cpu")
             del layer.mlp
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 
-            # Instancia o Novo Core DeepSliceMoE
+            # Instancia o Novo Core DeepSliceMoE na mesma GPU da camada original
             deepslice_moe = DeepSliceMoE(
                 hidden_size=hidden_size,
                 shared_expert=shared_expert,
                 routed_experts=routed_experts_module,
                 num_experts_per_tok=self.num_experts_per_tok
-            ).to(self.device)
+            ).to(layer_device)
             
             layer.add_module("mlp", deepslice_moe)
             logger.info(f"Layer {layer_idx}: Convertida para DeepSliceMoE -> Shared: {n_shared} nerônios | {self.num_routed_experts} Experts de ~{n_per_expert} neurônios")
